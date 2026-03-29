@@ -74,7 +74,10 @@ Hjälp kunden att boka en tid. Du behöver samla in:
 - Kundens namn och telefonnummer
 
 När du har all information, bekräfta bokningen och ge en bokningsreferens.
-Var hjälpsam och naturlig i konversationen."""
+Var hjälpsam och naturlig i konversationen.
+
+När bokningen är HELT bekräftad (ärende, verkstad, tid, namn och telefon alla insamlade och bekräftade för kunden), avsluta ditt svar med exakt denna token på en egen rad: [BOOKING_COMPLETE]
+Fortsätt INTE konversationen efter att du skrivit [BOOKING_COMPLETE]."""
 
 
 class UnconstrainedDialogManager:
@@ -113,11 +116,16 @@ class UnconstrainedDialogManager:
             temperature=0.7,
         )
 
+        is_complete = "[BOOKING_COMPLETE]" in reply
+        if is_complete:
+            reply = reply.replace("[BOOKING_COMPLETE]", "").strip()
+
         return {
             "reply": reply,
-            "system_state": None,   # unconstrained has no tracked state
+            "system_state": None,
             "slots_filled": {},
-            "current_step": "free",
+            "current_step": "complete" if is_complete else "free",
+            "is_complete": is_complete,
         }
 
 
@@ -333,12 +341,12 @@ class SkillBasedDialogManager:
         step = self._get_step(state.current_step_index)
 
         if step is None:
-            # Skill complete — should not happen in normal flow
             return {
                 "reply": "Tack för din bokning! Är det något annat jag kan hjälpa dig med?",
                 "system_state": state.to_dict(),
                 "slots_filled": state.slots,
                 "current_step": "complete",
+                "is_complete": True,
             }
 
         # First turn: just greet, no extraction needed
@@ -365,6 +373,7 @@ class SkillBasedDialogManager:
                         "system_state": state.to_dict(),
                         "slots_filled": state.slots,
                         "current_step": "complete",
+                        "is_complete": True,
                     }
 
                 # Run handler for new step if defined
@@ -394,7 +403,7 @@ class SkillBasedDialogManager:
                 state.current_step_index += 1
                 step = self._get_step(state.current_step_index)
                 if step is None:
-                    return {"reply": "Klart!", "system_state": state.to_dict(), "slots_filled": state.slots, "current_step": "complete"}
+                    return {"reply": "Klart!", "system_state": state.to_dict(), "slots_filled": state.slots, "current_step": "complete", "is_complete": True}
 
         # Run handler for current step if defined and not yet run
         if not handler_context and step.get("handler"):
@@ -418,4 +427,5 @@ class SkillBasedDialogManager:
             "system_state": state.to_dict(),
             "slots_filled": state.slots,
             "current_step": step["id"],
+            "is_complete": False,
         }

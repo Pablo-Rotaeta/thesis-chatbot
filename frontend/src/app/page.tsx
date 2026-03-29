@@ -70,7 +70,13 @@ export default function Page() {
     try {
       const res = await sendMessage(sessionId, text);
       setMsgs(m => [...m, { role: "assistant", content: res.reply, ts: Date.now() }]);
-      if (res.is_complete) setIsComplete(true);
+      if (res.is_complete) {
+        setIsComplete(true);
+        setTimeout(async () => {
+          await endSession(sessionId, true);
+          setScreen("questionnaire");
+        }, 2000);
+      }
     } catch {
       setMsgs(m => [...m, { role: "assistant", content: "⚠️ Ett fel uppstod. Försök igen.", ts: Date.now() }]);
     } finally {
@@ -80,7 +86,7 @@ export default function Page() {
   }, [input, loading, isComplete, sessionId]);
 
   async function handleFinish() {
-    await endSession(sessionId);
+    await endSession(sessionId, isComplete);
     setScreen("questionnaire");
   }
 
