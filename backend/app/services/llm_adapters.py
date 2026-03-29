@@ -86,7 +86,7 @@ class OllamaAdapter(BaseLLMAdapter):
 
 class GeminiAdapter(BaseLLMAdapter):
 
-    def __init__(self, model: str = "gemini-2.5-flash"):
+    def __init__(self, model: str = "gemini-2.0-flash-001"):
         self._model = model
         self.api_key = os.getenv("GEMINI_API_KEY", "")
 
