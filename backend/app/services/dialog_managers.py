@@ -114,6 +114,7 @@ class UnconstrainedDialogManager:
             messages=messages,
             system_prompt=self._build_system_prompt(),
             temperature=0.7,
+            max_tokens=1024,
         )
 
         is_complete = "[BOOKING_COMPLETE]" in reply
@@ -208,22 +209,34 @@ class SkillBasedDialogManager:
             # Fuzzy synonyms
             if fuzzy:
                 synonyms = {
-                    "service": ["olja", "oljebyte", "service", "filter", "kontroll"],
-                    "däckbyte": ["däck", "hjul", "sommar", "vinter", "dubb"],
-                    "bromsar": ["broms", "bromsa", "bromsskiva", "belägg"],
-                    "ac": ["ac", "luft", "kyla", "klimat", "luftkonditionering"],
-                    "besiktning": ["besiktning", "besikta", "kontrollbesiktning"],
-                    "annat": ["annat", "diagnos", "fel", "ljud", "problem"],
-                    "vasastan": ["vasastan", "uppland", "vasa", "norr"],
-                    "sodermalm": ["söder", "södermalm", "hornsgatan", "horn"],
+                    "service": ["olja", "oljebyte", "oljia", "olj", "olje", "service", "filter", "kontroll", "servis"],
+                    "däckbyte": ["däck", "dack", "hjul", "sommar", "vinter", "dubb", "däckbyte", "dackbyte"],
+                    "bromsar": ["broms", "bromsa", "bromsskiva", "belägg", "bromsarna"],
+                    "ac": ["ac", "luft", "kyla", "klimat", "luftkonditionering", "a/c"],
+                    "besiktning": ["besiktning", "besikta", "kontrollbesiktning", "besiktnings"],
+                    "annat": ["annat", "diagnos", "fel", "ljud", "problem", "övrigt"],
+                    "vasastan": ["vasastan", "uppland", "vasa", "norr", "upplandsgatan"],
+                    "sodermalm": ["söder", "södermalm", "hornsgatan", "horn", "sodermalm", "sodra", "södra"],
                     "nacka": ["nacka", "värmdö", "värmdövägen"],
-                    "solna": ["solna", "frösunda", "norra"],
-                    "ja": ["ja", "yes", "ok", "okej", "stämmer", "rätt", "bekräfta", "correct"],
-                    "nej": ["nej", "no", "fel", "ändra", "avbryt", "cancel"],
+                    "solna": ["solna", "frösunda", "norra", "frosunda"],
+                    "ja": ["ja", "yes", "ok", "okej", "stämmer", "rätt", "bekräfta", "correct", "japp", "jo"],
+                    "nej": ["nej", "no", "fel", "ändra", "avbryt", "cancel", "nope"],
                 }
                 for opt, syns in synonyms.items():
                     if opt in options and any(s in msg_lower for s in syns):
                         return opt
+            # Secondary keyword fallback for typos
+            service_keywords = {
+                "service": ["serv", "oil", "olja", "filter", "kontroll"],
+                "däckbyte": ["dack", "däck", "tire", "hjul"],
+                "bromsar": ["brom"],
+                "ac": ["klim", "cool", "ac"],
+                "besiktning": ["besikt", "inspect"],
+                "annat": ["annat", "other", "diag"],
+            }
+            for opt, keywords in service_keywords.items():
+                if opt in options and any(kw in msg_lower for kw in keywords):
+                    return opt
             return None
 
         elif vtype == "boolean":
@@ -236,8 +249,6 @@ class SkillBasedDialogManager:
             return None
 
         elif vtype == "available_slot":
-            loc_id = self.data["available_slots"]
-            # Try to find a time mention in the message
             slots_for_loc = self.data["available_slots"].get(
                 self.current_state.slots.get("location_id", ""), []
             )
@@ -341,6 +352,7 @@ class SkillBasedDialogManager:
         step = self._get_step(state.current_step_index)
 
         if step is None:
+            # Skill complete — should not happen in normal flow
             return {
                 "reply": "Tack för din bokning! Är det något annat jag kan hjälpa dig med?",
                 "system_state": state.to_dict(),
@@ -352,10 +364,37 @@ class SkillBasedDialogManager:
         # First turn: just greet, no extraction needed
         is_first_turn = len(conversation_history) == 0
 
-        slot_filled = False
         handler_context = ""
 
-        if not is_first_turn and step.get("slot"):
+        # ── Terminal step (slot: null) ──────────────────────────────────────
+        # Steps like "finalize" have no slot to extract — run handler,
+        # generate the closing message, and mark the conversation complete.
+        if not is_first_turn and step.get("slot") is None and not step.get("slots"):
+            if step.get("handler"):
+                handler_context = self._run_handler(step["handler"], state)
+
+            state.current_step_index += 1  # mark as done in state
+
+            messages = [Message(m["role"], m["content"]) for m in conversation_history]
+            messages.append(Message("user", user_message))
+            system_prompt = self._build_step_prompt(step, state, handler_context)
+
+            reply = await self.adapter.chat(
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=0.4,
+                max_tokens=1024,
+            )
+            return {
+                "reply": reply,
+                "system_state": state.to_dict(),
+                "slots_filled": state.slots,
+                "current_step": "complete",
+                "is_complete": True,
+            }
+
+        # ── Single-slot step ────────────────────────────────────────────────
+        elif not is_first_turn and step.get("slot"):
             extracted = self._extract_slot(step, user_message)
 
             if extracted:
@@ -363,7 +402,6 @@ class SkillBasedDialogManager:
                 state.slots[slot_key] = extracted
                 state.retry_count = 0
                 state.current_step_index += 1
-                slot_filled = True
 
                 # Advance to next step
                 step = self._get_step(state.current_step_index)
@@ -385,27 +423,46 @@ class SkillBasedDialogManager:
                 max_retries = self.recovery.get("max_retries_per_slot", 3)
                 if state.retry_count >= max_retries:
                     state.retry_count = 0
-                    # Use fallback instruction
                     step = {**step, "instruction": self.recovery["fallback_instruction"]}
 
+        # ── Multi-slot step ─────────────────────────────────────────────────
         elif not is_first_turn and step.get("slots"):
-            # Multi-slot step (name + phone)
             for slot_key in step["slots"]:
-                extracted = self._extract_slot(
-                    {**step, "slot": slot_key, "validation": step.get("validation", {}).get(slot_key, {})},
-                    user_message,
-                )
-                if extracted:
-                    state.slots[slot_key] = extracted
+                if slot_key in state.slots:
+                    continue  # already collected, do not overwrite
+
+                sub_validation = step.get("validation", {}).get(slot_key, {})
+
+                if not sub_validation:
+                    # No validation defined — use heuristic to avoid mixing
+                    # name and phone when they arrive in separate turns
+                    is_phone_input = bool(re.match(r"^[0-9+\-\s]{7,15}$", user_message.strip()))
+                    if slot_key == "customer_name" and not is_phone_input:
+                        state.slots[slot_key] = user_message.strip()
+                    elif slot_key == "customer_phone" and is_phone_input:
+                        state.slots[slot_key] = user_message.strip()
+                else:
+                    extracted = self._extract_slot(
+                        {**step, "slot": slot_key, "validation": sub_validation},
+                        user_message,
+                    )
+                    if extracted:
+                        state.slots[slot_key] = extracted
 
             # Check if all required slots are filled
             if all(k in state.slots for k in step["slots"]):
                 state.current_step_index += 1
                 step = self._get_step(state.current_step_index)
                 if step is None:
-                    return {"reply": "Klart!", "system_state": state.to_dict(), "slots_filled": state.slots, "current_step": "complete", "is_complete": True}
+                    return {
+                        "reply": "Klart!",
+                        "system_state": state.to_dict(),
+                        "slots_filled": state.slots,
+                        "current_step": "complete",
+                        "is_complete": True,
+                    }
 
-        # Run handler for current step if defined and not yet run
+        # Run handler for current step if not already run
         if not handler_context and step.get("handler"):
             handler_context = self._run_handler(step["handler"], state)
 
@@ -419,7 +476,8 @@ class SkillBasedDialogManager:
         reply = await self.adapter.chat(
             messages=messages,
             system_prompt=system_prompt,
-            temperature=0.4,   # lower temp = more predictable for constrained system
+            temperature=0.4,
+            max_tokens=1024,
         )
 
         return {
