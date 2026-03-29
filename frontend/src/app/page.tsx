@@ -161,7 +161,12 @@ function SetupScreen({ systemType, setSystemType, provider, setProvider, model, 
 
           <Field label="Modellversion (valfritt)" hint="Lämna tomt för standard">
             <input value={model} onChange={e => setModel(e.target.value)}
-              placeholder={provider === "gemini" ? "gemini-1.5-flash" : provider === "openai" ? "gpt-4o-mini" : provider === "anthropic" ? "claude-haiku-4-5-20251001" : "llama3"}
+              placeholder={
+                provider === "gemini"     ? "gemini-1.5-flash" :
+                provider === "openai"     ? "gpt-4o-mini" :
+                provider === "anthropic"  ? "claude-haiku-4-5-20251001" :
+                                            "llama3"
+              }
               style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid var(--border)", fontSize: 14, background: "var(--bg)", color: "var(--text)" }}
             />
           </Field>
