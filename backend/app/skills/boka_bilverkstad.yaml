@@ -1,0 +1,131 @@
+# ===========================================================================
+# Skill: Boka bilverkstadsbesök
+# ===========================================================================
+# This file defines the CONSTRAINED dialog manager.
+# Each step has:
+#   - a natural-language instruction (what the LLM should do)
+#   - the slot it must fill before advancing
+#   - optional validation rules
+#   - optional Python handler for business logic
+#
+# CONSTRAINT LEVEL is configurable per step:
+#   strict:   LLM must follow instruction exactly, slot extraction is verified
+#   moderate: LLM guides toward goal but may handle edge cases freely
+#   loose:    LLM gets a hint but has freedom (closer to unconstrained)
+# ===========================================================================
+
+skill:
+  name: "boka_bilverkstad"
+  description: "Bokar ett besök på en bilverkstad i Stockholmsområdet"
+  language: "sv"
+  version: "1.0"
+
+steps:
+  - id: greet
+    constraint_level: moderate
+    instruction: >
+      Hälsa användaren välkommen på svenska. Presentera dig som bokningsassistent
+      för bilverkstaden. Fråga vilket ärende de har, till exempel service,
+      däckbyte, bromsar eller annat. Håll tonen vänlig och professionell.
+      Svara ALLTID på svenska oavsett vad användaren skriver.
+    slot: service_type
+    validation:
+      type: enum
+      options: [service, däckbyte, bromsar, ac, besiktning, annat]
+      fuzzy_match: true   # allow "oljebyte" → service, "hjul" → däckbyte, etc.
+    on_invalid: >
+      Be användaren förtydliga vilket ärende de har. Erbjud alternativen:
+      service/oljebyte, däckbyte, bromsar, AC-service, besiktningsförberedelse,
+      eller annat/diagnos.
+
+  - id: collect_location
+    constraint_level: strict
+    instruction: >
+      Presentera de tillgängliga verkstäderna och fråga vilken plats som passar
+      användaren bäst. Lista ALLTID alla fyra alternativen:
+      1. Vasastan (Upplandsgatan 14)
+      2. Södermalm (Hornsgatan 82)
+      3. Nacka (Värmdövägen 55)
+      4. Solna (Frösundaleden 4)
+      Fråga inte om annat förrän de har valt en plats.
+    slot: location_id
+    validation:
+      type: enum
+      options: [vasastan, sodermalm, nacka, solna]
+      fuzzy_match: true   # "söder" → sodermalm, "norra" → solna, etc.
+    on_invalid: >
+      Påminn användaren om de fyra alternativen och be dem välja en.
+
+  - id: collect_date
+    constraint_level: strict
+    instruction: >
+      Visa de tillgängliga tiderna för den valda verkstaden (hämtas från systemet).
+      Fråga vilken tid som passar användaren. Presentera tiderna grupperade per dag.
+      Fråga ENBART om tid — samla inte in mer information nu.
+    slot: appointment_slot
+    handler: "get_available_slots"   # Python function called before this step
+    validation:
+      type: available_slot           # checked against live data
+    on_invalid: >
+      Den valda tiden finns tyvärr inte tillgänglig. Be användaren välja en av
+      de visade tiderna.
+
+  - id: collect_name
+    constraint_level: moderate
+    instruction: >
+      Fråga efter användarens namn och telefonnummer för att slutföra bokningen.
+      Du kan fråga om båda i samma meddelande.
+    slots:
+      - customer_name
+      - customer_phone
+    validation:
+      customer_phone:
+        type: regex
+        pattern: "^[0-9+\\-\\s]{7,15}$"
+        error_message: "Telefonnumret verkar inte stämma. Kan du kontrollera det?"
+
+  - id: confirm
+    constraint_level: strict
+    instruction: >
+      Sammanfatta bokningen tydligt på svenska med alla detaljer:
+      - Ärende
+      - Verkstad och adress
+      - Datum och tid
+      - Namn och telefonnummer
+      Fråga om allt stämmer och om de vill bekräfta bokningen (ja/nej).
+      Ändra INGET utan att användaren ber om det.
+    slot: confirmation
+    validation:
+      type: boolean
+      true_values: [ja, yes, ok, okej, bekräfta, stämmer, rätt, correct]
+      false_values: [nej, no, fel, ändra, avbryt, cancel]
+
+  - id: finalize
+    constraint_level: strict
+    instruction: >
+      Bokningen är bekräftad. Tacka användaren och ge dem:
+      - En bokningsreferens (genereras automatiskt)
+      - Påminnelse om att de kan ringa verkstaden vid frågor
+      Avsluta konversationen artigt. Fråga INTE om mer information.
+    slot: null   # terminal step — no slot to fill
+    handler: "create_booking"
+
+# ===========================================================================
+# Recovery strategy (applies to all steps)
+# ===========================================================================
+recovery:
+  max_retries_per_slot: 3
+  fallback_instruction: >
+    Användaren verkar ha svårt att förstå frågan. Förenkla och försök igen.
+    Om problemet kvarstår, erbjud att börja om från början.
+  after_max_retries: restart_step   # options: restart_step | restart_skill | escalate
+
+# ===========================================================================
+# Global system context (injected into every prompt)
+# ===========================================================================
+system_context: >
+  Du är en bokningsassistent för en bilverkstad i Stockholmsområdet.
+  Du MÅSTE alltid svara på svenska, oavsett vilket språk användaren skriver på.
+  Du är hjälpsam, professionell och kortfattad.
+  Du följer en strukturerad bokningsprocess och avviker inte från den.
+  Du samlar in information ett steg i taget.

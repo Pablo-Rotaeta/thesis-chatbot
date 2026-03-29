@@ -1,0 +1,52 @@
+/*!*****************************************************************************************************************************************************************************************************************************************************************!*\
+  !*** css ./node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!./node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css ***!
+  \*****************************************************************************************************************************************************************************************************************************************************************/
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #F5F4F0;
+  --surface:   #FFFFFF;
+  --border:    #E2E0DA;
+  --text:      #1A1916;
+  --muted:     #7A7870;
+  --accent:    #1B4FD8;
+  --accent-lt: #EEF2FF;
+  --bot-bg:    #FFFFFF;
+  --user-bg:   #1B4FD8;
+  --user-text: #FFFFFF;
+  --radius:    16px;
+  --shadow:    0 2px 16px rgba(0,0,0,0.07);
+}
+
+html, body { height: 100%; font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); }
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  outline: none;
+}
+
+input, select {
+  font-family: inherit;
+  outline: none;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%, 80%, 100% { opacity: 0.2; transform: scale(0.85); }
+  40%           { opacity: 1;   transform: scale(1); }
+}
+
+.fade-up { animation: fadeUp 0.25s ease both; }
