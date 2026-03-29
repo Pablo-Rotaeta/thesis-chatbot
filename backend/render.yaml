@@ -11,3 +11,4 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
+    pythonVersion: "3.11.9"
