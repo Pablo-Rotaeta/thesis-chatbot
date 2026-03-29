@@ -26,7 +26,7 @@ export default function Page() {
   const [screen, setScreen] = useState<Screen>("setup");
   const [systemType, setSystemType] = useState<SystemType>("skill_based");
   const [provider, setProvider] = useState<Provider>("gemini");
-  const [model, setModel] = useState("gemini-1.5-flash");
+  const [model, setModel] = useState("gemini-2.0-flash-001");
   const [sessionId, setSessionId] = useState("");
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
