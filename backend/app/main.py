@@ -1,7 +1,15 @@
-from dotenv import load_dotenv
-load_dotenv()
 import os
-print("OPENAI KEY:", os.getenv("OPENAI_API_KEY", "NOT FOUND")[:20])
+from dotenv import load_dotenv
+
+# Load .env file — must be before any other imports
+load_dotenv()
+
+# Debug — confirm keys are loaded (remove after testing)
+print("=== ENV CHECK ===")
+print("OPENAI:", os.getenv("OPENAI_API_KEY", "NOT FOUND")[:15] + "...")
+print("GEMINI:", os.getenv("GEMINI_API_KEY", "NOT FOUND")[:15] + "...")
+print("ANTHROPIC:", os.getenv("ANTHROPIC_API_KEY", "NOT FOUND")[:15] + "...")
+print("=================")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +19,7 @@ app = FastAPI(title="Thesis Chatbot API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # restrict in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
