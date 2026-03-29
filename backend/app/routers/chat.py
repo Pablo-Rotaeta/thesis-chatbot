@@ -127,11 +127,15 @@ async def send_message(req: MessageRequest):
         is_repair,
     )
 
+    # Use is_complete from the dialog manager directly.
+    # Fallback to checking current_step for backwards compatibility.
+    is_complete = result.get("is_complete", result.get("current_step") == "complete")
+
     return {
         "reply": result["reply"],
         "current_step": result.get("current_step"),
         "slots_filled": result.get("slots_filled", {}),
-        "is_complete": result.get("current_step") == "complete",
+        "is_complete": is_complete,
     }
 
 
