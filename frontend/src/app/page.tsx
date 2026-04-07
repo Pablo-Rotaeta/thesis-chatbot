@@ -25,8 +25,8 @@ const UES_QUESTIONS = [
 export default function Page() {
   const [screen, setScreen] = useState<Screen>("setup");
   const [systemType, setSystemType] = useState<SystemType>("skill_based");
-  const [provider, setProvider] = useState<Provider>("gemini");
-  const [model, setModel] = useState("gemini-2.0-flash-001");
+  const PROVIDER = "gemini";
+  const MODEL = "gemini-2.0-flash-lite";
   const [sessionId, setSessionId] = useState("");
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -47,7 +47,7 @@ export default function Page() {
     setError("");
     setLoading(true);
     try {
-      const res = await startSession(systemType, provider, model || undefined);
+      const res = await startSession(systemType, PROVIDER, MODEL);
       setSessionId(res.session_id);
       setMsgs([{ role: "assistant", content: res.opening_message, ts: Date.now() }]);
       setScreen("chat");
@@ -106,8 +106,6 @@ export default function Page() {
 
   if (screen === "setup") return <SetupScreen
     systemType={systemType} setSystemType={setSystemType}
-    provider={provider} setProvider={setProvider}
-    model={model} setModel={setModel}
     onStart={handleStart} loading={loading} error={error}
   />;
 
@@ -128,7 +126,7 @@ export default function Page() {
 
 // ─── Setup Screen ─────────────────────────────────────────────────────────────
 
-function SetupScreen({ systemType, setSystemType, provider, setProvider, model, setModel, onStart, loading, error }: any) {
+function SetupScreen({ systemType, setSystemType, onStart, loading, error }: any) {
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }}>
       <div style={{ width: "100%", maxWidth: 460, background: "var(--surface)", borderRadius: "var(--radius)", border: "1px solid var(--border)", padding: "40px 36px", boxShadow: "var(--shadow)" }}>
@@ -144,7 +142,6 @@ function SetupScreen({ systemType, setSystemType, provider, setProvider, model, 
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-
           <Field label="Systemtyp">
             <ToggleGroup
               options={[
@@ -152,28 +149,6 @@ function SetupScreen({ systemType, setSystemType, provider, setProvider, model, 
                 { value: "unconstrained", label: "Fri LLM", desc: "Utan begränsning" },
               ]}
               value={systemType} onChange={setSystemType}
-            />
-          </Field>
-
-          <Field label="AI-modell">
-            <select value={provider} onChange={e => setProvider(e.target.value)}
-              style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid var(--border)", fontSize: 14, background: "var(--bg)", color: "var(--text)" }}>
-              <option value="gemini">Google Gemini</option>
-              <option value="openai">OpenAI GPT</option>
-              <option value="anthropic">Anthropic Claude</option>
-              <option value="ollama">Ollama (lokal)</option>
-            </select>
-          </Field>
-
-          <Field label="Modellversion (valfritt)" hint="Lämna tomt för standard">
-            <input value={model} onChange={e => setModel(e.target.value)}
-              placeholder={
-                provider === "gemini"     ? "gemini-1.5-flash" :
-                provider === "openai"     ? "gpt-4o-mini" :
-                provider === "anthropic"  ? "claude-haiku-4-5-20251001" :
-                                            "llama3"
-              }
-              style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid var(--border)", fontSize: 14, background: "var(--bg)", color: "var(--text)" }}
             />
           </Field>
 
