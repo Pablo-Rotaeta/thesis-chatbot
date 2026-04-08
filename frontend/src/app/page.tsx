@@ -15,7 +15,7 @@ type Screen = "setup" | "chat" | "questionnaire" | "done";
 
 const UES_QUESTIONS = [
   { id: "a1", label: "Did the system complete the intended task?", type: "yn" },
-  { id: "a2", label: "How satisfied are you with the result?", type: "scale" },
+  { id: "a2", label: "The result was satisfactory", type: "scale" },
   { id: "b1", label: "I was engaged in the conversation with the system", type: "scale" },
   { id: "b2", label: "The system was easy to use", type: "scale" },
   { id: "b3", label: "Interacting with the system was rewarding", type: "scale" },
@@ -32,7 +32,7 @@ export default function Page() {
   // FIX B: provider and model are now constants — not state, not passed as props.
   // The ChatScreen no longer needs them as props.
   const PROVIDER: Provider = "gemini";
-  const MODEL = "gemini-2.0-flash";
+  const MODEL = "gemini-2.5-flash";
 
   const [sessionId, setSessionId] = useState("");
   const [msgs, setMsgs] = useState<Msg[]>([]);
