@@ -1,18 +1,6 @@
 # ===========================================================================
 # Skill: Boka bilverkstadsbesök
 # ===========================================================================
-# This file defines the CONSTRAINED dialog manager.
-# Each step has:
-#   - a natural-language instruction (what the LLM should do)
-#   - the slot it must fill before advancing
-#   - optional validation rules
-#   - optional Python handler for business logic
-#
-# CONSTRAINT LEVEL is configurable per step:
-#   strict:   LLM must follow instruction exactly, slot extraction is verified
-#   moderate: LLM guides toward goal but may handle edge cases freely
-#   loose:    LLM gets a hint but has freedom (closer to unconstrained)
-# ===========================================================================
 
 skill:
   name: "boka_bilverkstad"
@@ -25,14 +13,16 @@ steps:
     constraint_level: moderate
     instruction: >
       Hälsa användaren välkommen på svenska. Presentera dig som bokningsassistent
-      för bilverkstaden. Fråga vilket ärende de har, till exempel service,
-      däckbyte, bromsar eller annat. Håll tonen vänlig och professionell.
+      för bilverkstaden och fråga vad du kan hjälpa dem med idag.
+      Håll tonen vänlig och professionell. Nämn INTE specifika tjänster eller
+      alternativ i välkomstmeddelandet — låt användaren beskriva sitt ärende
+      med egna ord.
       Svara ALLTID på svenska oavsett vad användaren skriver.
     slot: service_type
     validation:
       type: enum
       options: [service, däckbyte, bromsar, ac, besiktning, annat]
-      fuzzy_match: true   # allow "oljebyte" → service, "hjul" → däckbyte, etc.
+      fuzzy_match: true
     on_invalid: >
       Be användaren förtydliga vilket ärende de har. Erbjud alternativen:
       service/oljebyte, däckbyte, bromsar, AC-service, besiktningsförberedelse,
@@ -52,7 +42,7 @@ steps:
     validation:
       type: enum
       options: [vasastan, sodermalm, nacka, solna]
-      fuzzy_match: true   # "söder" → sodermalm, "norra" → solna, etc.
+      fuzzy_match: true
     on_invalid: >
       Påminn användaren om de fyra alternativen och be dem välja en.
 
@@ -63,9 +53,9 @@ steps:
       Fråga vilken tid som passar användaren. Presentera tiderna grupperade per dag.
       Fråga ENBART om tid — samla inte in mer information nu.
     slot: appointment_slot
-    handler: "get_available_slots"   # Python function called before this step
+    handler: "get_available_slots"
     validation:
-      type: available_slot           # checked against live data
+      type: available_slot
     on_invalid: >
       Den valda tiden finns tyvärr inte tillgänglig. Be användaren välja en av
       de visade tiderna.
@@ -97,8 +87,8 @@ steps:
     slot: confirmation
     validation:
       type: boolean
-      true_values: [ja, yes, ok, okej, bekräfta, stämmer, rätt, correct]
-      false_values: [nej, no, fel, ändra, avbryt, cancel]
+      true_values: [ja, yes, ok, okej, bekräfta, stämmer, rätt, correct, japp, jo]
+      false_values: [nej, no, fel, ändra, avbryt, cancel, nope]
 
   - id: finalize
     constraint_level: strict
@@ -107,21 +97,21 @@ steps:
       - En bokningsreferens (genereras automatiskt)
       - Påminnelse om att de kan ringa verkstaden vid frågor
       Avsluta konversationen artigt. Fråga INTE om mer information.
-    slot: null   # terminal step — no slot to fill
+    slot: null
     handler: "create_booking"
 
 # ===========================================================================
-# Recovery strategy (applies to all steps)
+# Recovery strategy
 # ===========================================================================
 recovery:
   max_retries_per_slot: 3
   fallback_instruction: >
     Användaren verkar ha svårt att förstå frågan. Förenkla och försök igen.
     Om problemet kvarstår, erbjud att börja om från början.
-  after_max_retries: restart_step   # options: restart_step | restart_skill | escalate
+  after_max_retries: restart_step
 
 # ===========================================================================
-# Global system context (injected into every prompt)
+# Global system context
 # ===========================================================================
 system_context: >
   Du är en bokningsassistent för en bilverkstad i Stockholmsområdet.

@@ -73,7 +73,6 @@ class OllamaAdapter(BaseLLMAdapter):
             "stream": False,
             "options": {"temperature": temperature, "num_predict": max_tokens},
         }
-
         async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(f"{self.base_url}/api/chat", json=payload)
             r.raise_for_status()
@@ -81,12 +80,14 @@ class OllamaAdapter(BaseLLMAdapter):
 
 
 # ---------------------------------------------------------------------------
-# Gemini (FIXED)
+# Gemini
+# FIX A: changed default model from "gemini-2.0-flash-lite" (does not exist)
+#        to "gemini-2.0-flash" which is confirmed available in your account.
 # ---------------------------------------------------------------------------
 
 class GeminiAdapter(BaseLLMAdapter):
 
-    def __init__(self, model: str = "gemini-2.0-flash-lite"):
+    def __init__(self, model: str = "gemini-2.0-flash"):
         self._model = model
         self.api_key = os.getenv("GEMINI_API_KEY", "")
 
@@ -104,9 +105,7 @@ class GeminiAdapter(BaseLLMAdapter):
             f"{self._model}:generateContent?key={self.api_key}"
         )
 
-        # 🔥 FIX: flatten everything into one prompt
         full_prompt = system_prompt + "\n\n"
-
         for m in messages:
             if m.role == "user":
                 full_prompt += f"User: {m.content}\n"
@@ -114,11 +113,7 @@ class GeminiAdapter(BaseLLMAdapter):
                 full_prompt += f"Assistant: {m.content}\n"
 
         payload = {
-            "contents": [
-                {
-                    "parts": [{"text": full_prompt}]
-                }
-            ],
+            "contents": [{"parts": [{"text": full_prompt}]}],
             "generationConfig": {
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens,
@@ -128,7 +123,6 @@ class GeminiAdapter(BaseLLMAdapter):
         async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(url, json=payload)
             r.raise_for_status()
-
             data = r.json()
             return data["candidates"][0]["content"]["parts"][0]["text"]
 
@@ -159,9 +153,7 @@ class OpenAIAdapter(BaseLLMAdapter):
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-
         headers = {"Authorization": f"Bearer {self.api_key}"}
-
         async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(
                 "https://api.openai.com/v1/chat/completions",
@@ -197,13 +189,11 @@ class AnthropicAdapter(BaseLLMAdapter):
             "system": system_prompt,
             "messages": [m.to_dict() for m in messages if m.role != "system"],
         }
-
         headers = {
             "x-api-key": self.api_key,
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         }
-
         async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(
                 "https://api.anthropic.com/v1/messages",
@@ -219,15 +209,12 @@ class AnthropicAdapter(BaseLLMAdapter):
 # ---------------------------------------------------------------------------
 
 def get_adapter(provider: str, model: Optional[str] = None) -> BaseLLMAdapter:
-
     adapters = {
-        "ollama": lambda m: OllamaAdapter(model=m or "llama3"),
-        "gemini": lambda m: GeminiAdapter(model=m or "gemini-2.0-flash-lite"),
-        "openai": lambda m: OpenAIAdapter(model=m or "gpt-4o-mini"),
+        "ollama":    lambda m: OllamaAdapter(model=m or "llama3"),
+        "gemini":    lambda m: GeminiAdapter(model=m or "gemini-2.0-flash"),
+        "openai":    lambda m: OpenAIAdapter(model=m or "gpt-4o-mini"),
         "anthropic": lambda m: AnthropicAdapter(model=m or "claude-haiku-4-5-20251001"),
     }
-
     if provider not in adapters:
         raise ValueError(f"Unknown provider '{provider}'")
-
     return adapters[provider](model)

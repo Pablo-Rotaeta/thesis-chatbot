@@ -3,21 +3,24 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { startSession, sendMessage, endSession, SystemType, Provider } from "@/lib/api";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Msg { role: "user" | "assistant"; content: string; ts: number; }
 type Screen = "setup" | "chat" | "questionnaire" | "done";
 
-// ─── Questionnaire ────────────────────────────────────────────────────────────
+// ─── Questionnaire questions ──────────────────────────────────────────────────
+// FIX D: Edit the question text here to change what participants see.
+// type "yn"    = Yes/No buttons
+// type "scale" = 1–5 scale (Instämmer ej → Instämmer)
 
 const UES_QUESTIONS = [
-  { id: "a1", label: "Systemet utförde den avsedda uppgiften", type: "yn" },
-  { id: "a2", label: "Hur nöjd är du med resultatet?", type: "scale" },
-  { id: "b1", label: "Jag var engagerad i konversationen med systemet", type: "scale" },
-  { id: "b2", label: "Systemet var enkelt att använda", type: "scale" },
-  { id: "b3", label: "Interaktionen med systemet var belönande", type: "scale" },
-  { id: "b4", label: "Systemets funktioner mötte mina behov", type: "scale" },
-  { id: "b5", label: "Jag tyckte att systemet var lätt att kommunicera med", type: "scale" },
+  { id: "a1", label: "Did the system complete the intended task?", type: "yn" },
+  { id: "a2", label: "How satisfied are you with the result?", type: "scale" },
+  { id: "b1", label: "I was engaged in the conversation with the system", type: "scale" },
+  { id: "b2", label: "The system was easy to use", type: "scale" },
+  { id: "b3", label: "Interacting with the system was rewarding", type: "scale" },
+  { id: "b4", label: "The system's features met my needs", type: "scale" },
+  { id: "b5", label: "I found the system easy to communicate with", type: "scale" },
 ];
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -25,8 +28,12 @@ const UES_QUESTIONS = [
 export default function Page() {
   const [screen, setScreen] = useState<Screen>("setup");
   const [systemType, setSystemType] = useState<SystemType>("skill_based");
-  const PROVIDER = "gemini";
-  const MODEL = "gemini-2.0-flash-lite";
+
+  // FIX B: provider and model are now constants — not state, not passed as props.
+  // The ChatScreen no longer needs them as props.
+  const PROVIDER: Provider = "gemini";
+  const MODEL = "gemini-2.0-flash";
+
   const [sessionId, setSessionId] = useState("");
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -41,7 +48,7 @@ export default function Page() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, loading]);
 
-  // ── Setup ────────────────────────────────────────────────────────────────
+  // ── Setup ─────────────────────────────────────────────────────────────────
 
   async function handleStart() {
     setError("");
@@ -59,7 +66,7 @@ export default function Page() {
     }
   }
 
-  // ── Chat ─────────────────────────────────────────────────────────────────
+  // ── Chat ──────────────────────────────────────────────────────────────────
 
   const handleSend = useCallback(async () => {
     if (!input.trim() || loading || isComplete) return;
@@ -70,12 +77,15 @@ export default function Page() {
     try {
       const res = await sendMessage(sessionId, text);
       setMsgs(m => [...m, { role: "assistant", content: res.reply, ts: Date.now() }]);
+
+      // FIX C: both systems now auto-transition to questionnaire when complete.
+      // The skill-based system was previously waiting for an extra manual click.
       if (res.is_complete) {
         setIsComplete(true);
         setTimeout(async () => {
           await endSession(sessionId, true);
           setScreen("questionnaire");
-        }, 2000);
+        }, 2000); // 2s delay so user can read the final confirmation message
       }
     } catch {
       setMsgs(m => [...m, { role: "assistant", content: "⚠️ Ett fel uppstod. Försök igen.", ts: Date.now() }]);
@@ -85,35 +95,37 @@ export default function Page() {
     }
   }, [input, loading, isComplete, sessionId]);
 
+  // Manual finish button (shown while conversation is active, as fallback)
   async function handleFinish() {
     await endSession(sessionId, isComplete);
     setScreen("questionnaire");
   }
 
-  // ── Questionnaire ─────────────────────────────────────────────────────────
+  // ── Questionnaire ──────────────────────────────────────────────────────────
 
   function handleAnswer(id: string, val: string) {
     setAnswers(a => ({ ...a, [id]: val }));
   }
 
   async function handleSubmitQuestionnaire() {
-    // In production, POST answers to backend linked to session_id
     console.log("Questionnaire answers:", { session_id: sessionId, ...answers });
     setScreen("done");
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
 
+  // FIX B: SetupScreen no longer receives provider/model props
   if (screen === "setup") return <SetupScreen
     systemType={systemType} setSystemType={setSystemType}
     onStart={handleStart} loading={loading} error={error}
   />;
 
+  // FIX B: ChatScreen no longer receives provider prop (was causing crash)
   if (screen === "chat") return <ChatScreen
     msgs={msgs} loading={loading} input={input}
     setInput={setInput} onSend={handleSend} onFinish={handleFinish}
     inputRef={inputRef} bottomRef={bottomRef}
-    isComplete={isComplete} systemType={systemType} provider={provider}
+    isComplete={isComplete} systemType={systemType}
   />;
 
   if (screen === "questionnaire") return <QuestionnaireScreen
@@ -124,7 +136,8 @@ export default function Page() {
   return <DoneScreen />;
 }
 
-// ─── Setup Screen ─────────────────────────────────────────────────────────────
+// ─── Setup Screen ──────────────────────────────────────────────────────────────
+// FIX B: removed provider/model fields entirely from the UI
 
 function SetupScreen({ systemType, setSystemType, onStart, loading, error }: any) {
   return (
@@ -137,7 +150,7 @@ function SetupScreen({ systemType, setSystemType, onStart, loading, error }: any
           </div>
           <h1 style={{ fontSize: 26, fontWeight: 600, lineHeight: 1.2, marginBottom: 8 }}>Boka din tid</h1>
           <p style={{ fontSize: 15, color: "var(--muted)", lineHeight: 1.6 }}>
-            Välj systeminställningar nedan och starta sedan konversationen.
+            Välj systemtyp och starta sedan konversationen.
           </p>
         </div>
 
@@ -166,9 +179,10 @@ function SetupScreen({ systemType, setSystemType, onStart, loading, error }: any
   );
 }
 
-// ─── Chat Screen ──────────────────────────────────────────────────────────────
+// ─── Chat Screen ───────────────────────────────────────────────────────────────
+// FIX B: removed provider prop
 
-function ChatScreen({ msgs, loading, input, setInput, onSend, onFinish, inputRef, bottomRef, isComplete, systemType, provider }: any) {
+function ChatScreen({ msgs, loading, input, setInput, onSend, onFinish, inputRef, bottomRef, isComplete, systemType }: any) {
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", maxWidth: 680, margin: "0 auto" }}>
 
@@ -177,13 +191,14 @@ function ChatScreen({ msgs, loading, input, setInput, onSend, onFinish, inputRef
         <div>
           <div style={{ fontWeight: 600, fontSize: 15 }}>Bilverkstad – Boka tid</div>
           <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-            {systemType === "skill_based" ? "Skill-based" : "Fri LLM"} · {provider}
+            {systemType === "skill_based" ? "Skill-based" : "Fri LLM"}
           </div>
         </div>
-        {isComplete && (
+        {/* Manual finish button — only shown if conversation is active (fallback) */}
+        {!isComplete && (
           <button onClick={onFinish}
-            style={{ padding: "8px 16px", borderRadius: 10, background: "var(--accent)", color: "#fff", fontSize: 13, fontWeight: 600 }}>
-            Avsluta & betygsätt
+            style={{ padding: "8px 16px", borderRadius: 10, background: "var(--border)", color: "var(--muted)", fontSize: 13, fontWeight: 600 }}>
+            Avsluta
           </button>
         )}
       </div>
@@ -198,7 +213,8 @@ function ChatScreen({ msgs, loading, input, setInput, onSend, onFinish, inputRef
               </div>
             )}
             <div style={{
-              maxWidth: "75%", padding: "12px 16px", borderRadius: m.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+              maxWidth: "75%", padding: "12px 16px",
+              borderRadius: m.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
               background: m.role === "user" ? "var(--user-bg)" : "var(--bot-bg)",
               color: m.role === "user" ? "var(--user-text)" : "var(--text)",
               border: m.role === "assistant" ? "1px solid var(--border)" : "none",
@@ -220,9 +236,10 @@ function ChatScreen({ msgs, loading, input, setInput, onSend, onFinish, inputRef
           </div>
         )}
 
+        {/* FIX C: removed the manual "Avsluta & betygsätt" message — transition is now automatic */}
         {isComplete && (
           <div className="fade-up" style={{ textAlign: "center", padding: "16px", color: "var(--muted)", fontSize: 13 }}>
-            Bokningen är klar! Klicka på "Avsluta & betygsätt" ovan.
+            Bokningen är klar! Du omdirigeras till utvärderingen...
           </div>
         )}
 
@@ -237,7 +254,7 @@ function ChatScreen({ msgs, loading, input, setInput, onSend, onFinish, inputRef
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === "Enter" && !e.shiftKey && onSend()}
           disabled={loading || isComplete}
-          placeholder={isComplete ? "Konversationen är avslutad" : "Skriv ett meddelande…"}
+          placeholder={isComplete ? "Omdirigerar till utvärdering..." : "Skriv ett meddelande…"}
           style={{ flex: 1, padding: "12px 16px", borderRadius: 12, border: "1px solid var(--border)", fontSize: 14, background: isComplete ? "var(--bg)" : "var(--surface)", color: "var(--text)", transition: "border-color 0.15s" }}
         />
         <button onClick={onSend} disabled={loading || isComplete || !input.trim()}
@@ -249,7 +266,7 @@ function ChatScreen({ msgs, loading, input, setInput, onSend, onFinish, inputRef
   );
 }
 
-// ─── Questionnaire ────────────────────────────────────────────────────────────
+// ─── Questionnaire ─────────────────────────────────────────────────────────────
 
 function QuestionnaireScreen({ answers, onAnswer, onSubmit, sessionId }: any) {
   const allAnswered = UES_QUESTIONS.every(q => answers[q.id]);
@@ -257,8 +274,8 @@ function QuestionnaireScreen({ answers, onAnswer, onSubmit, sessionId }: any) {
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }}>
       <div style={{ width: "100%", maxWidth: 520, background: "var(--surface)", borderRadius: "var(--radius)", border: "1px solid var(--border)", padding: "40px 36px", boxShadow: "var(--shadow)" }}>
         <div style={{ marginBottom: 28 }}>
-          <div style={{ fontSize: 13, fontWeight: 500, color: "var(--accent)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>Utvärdering</div>
-          <h2 style={{ fontSize: 22, fontWeight: 600, marginBottom: 6 }}>Hur upplevde du konversationen?</h2>
+          <div style={{ fontSize: 13, fontWeight: 500, color: "var(--accent)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>Evaluation</div>
+          <h2 style={{ fontSize: 22, fontWeight: 600, marginBottom: 6 }}>How did you experience the conversation?</h2>
           <p style={{ fontSize: 13, color: "var(--muted)" }}>Session: <code style={{ fontFamily: "'DM Mono', monospace", fontSize: 12 }}>{sessionId.slice(0, 8)}</code></p>
         </div>
 
@@ -268,7 +285,7 @@ function QuestionnaireScreen({ answers, onAnswer, onSubmit, sessionId }: any) {
               <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 10, lineHeight: 1.4 }}>{q.label}</div>
               {q.type === "yn" ? (
                 <div style={{ display: "flex", gap: 8 }}>
-                  {["Ja", "Nej"].map(v => (
+                  {["Yes", "No"].map(v => (
                     <button key={v} onClick={() => onAnswer(q.id, v)}
                       style={{ padding: "8px 20px", borderRadius: 8, border: `1.5px solid ${answers[q.id] === v ? "var(--accent)" : "var(--border)"}`, background: answers[q.id] === v ? "var(--accent-lt)" : "transparent", color: answers[q.id] === v ? "var(--accent)" : "var(--text)", fontSize: 14, fontWeight: 500, transition: "all 0.1s" }}>
                       {v}
@@ -277,14 +294,14 @@ function QuestionnaireScreen({ answers, onAnswer, onSubmit, sessionId }: any) {
                 </div>
               ) : (
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <span style={{ fontSize: 12, color: "var(--muted)", width: 60 }}>Instämmer ej</span>
+                  <span style={{ fontSize: 12, color: "var(--muted)", width: 72 }}>Disagree</span>
                   {[1, 2, 3, 4, 5].map(n => (
                     <button key={n} onClick={() => onAnswer(q.id, String(n))}
                       style={{ width: 38, height: 38, borderRadius: 8, border: `1.5px solid ${answers[q.id] === String(n) ? "var(--accent)" : "var(--border)"}`, background: answers[q.id] === String(n) ? "var(--accent)" : "transparent", color: answers[q.id] === String(n) ? "#fff" : "var(--text)", fontSize: 14, fontWeight: 500, transition: "all 0.1s" }}>
                       {n}
                     </button>
                   ))}
-                  <span style={{ fontSize: 12, color: "var(--muted)", width: 60, textAlign: "right" }}>Instämmer</span>
+                  <span style={{ fontSize: 12, color: "var(--muted)", width: 72, textAlign: "right" }}>Agree</span>
                 </div>
               )}
             </div>
@@ -292,7 +309,7 @@ function QuestionnaireScreen({ answers, onAnswer, onSubmit, sessionId }: any) {
 
           <button onClick={onSubmit} disabled={!allAnswered}
             style={{ padding: "13px 24px", borderRadius: 12, background: allAnswered ? "var(--accent)" : "var(--border)", color: allAnswered ? "#fff" : "var(--muted)", fontSize: 15, fontWeight: 600, transition: "all 0.15s", marginTop: 8 }}>
-            Skicka svar
+            Submit
           </button>
         </div>
       </div>
@@ -300,23 +317,23 @@ function QuestionnaireScreen({ answers, onAnswer, onSubmit, sessionId }: any) {
   );
 }
 
-// ─── Done ─────────────────────────────────────────────────────────────────────
+// ─── Done ──────────────────────────────────────────────────────────────────────
 
 function DoneScreen() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }}>
       <div style={{ textAlign: "center", maxWidth: 380 }}>
         <div style={{ fontSize: 48, marginBottom: 20 }}>✓</div>
-        <h2 style={{ fontSize: 24, fontWeight: 600, marginBottom: 12 }}>Tack för din medverkan!</h2>
+        <h2 style={{ fontSize: 24, fontWeight: 600, marginBottom: 12 }}>Thank you for your participation!</h2>
         <p style={{ fontSize: 15, color: "var(--muted)", lineHeight: 1.7 }}>
-          Dina svar har sparats. Du kan nu stänga den här fliken.
+          Your answers have been saved. You may now close this tab.
         </p>
       </div>
     </div>
   );
 }
 
-// ─── Small UI helpers ─────────────────────────────────────────────────────────
+// ─── UI helpers ────────────────────────────────────────────────────────────────
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
