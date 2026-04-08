@@ -82,12 +82,12 @@ class OllamaAdapter(BaseLLMAdapter):
 # ---------------------------------------------------------------------------
 # Gemini
 # FIX A: changed default model from "gemini-2.0-flash-lite" (does not exist)
-#        to "gemini-2.0-flash" which is confirmed available in your account.
+#        to "gemini-2.5-flash" which is confirmed available in your account.
 # ---------------------------------------------------------------------------
 
 class GeminiAdapter(BaseLLMAdapter):
 
-    def __init__(self, model: str = "gemini-2.0-flash"):
+    def __init__(self, model: str = "gemini-2.5-flash"):
         self._model = model
         self.api_key = os.getenv("GEMINI_API_KEY", "")
 
@@ -211,7 +211,7 @@ class AnthropicAdapter(BaseLLMAdapter):
 def get_adapter(provider: str, model: Optional[str] = None) -> BaseLLMAdapter:
     adapters = {
         "ollama":    lambda m: OllamaAdapter(model=m or "llama3"),
-        "gemini":    lambda m: GeminiAdapter(model=m or "gemini-2.0-flash"),
+        "gemini":    lambda m: GeminiAdapter(model=m or "gemini-2.5-flash"),
         "openai":    lambda m: OpenAIAdapter(model=m or "gpt-4o-mini"),
         "anthropic": lambda m: AnthropicAdapter(model=m or "claude-haiku-4-5-20251001"),
     }
