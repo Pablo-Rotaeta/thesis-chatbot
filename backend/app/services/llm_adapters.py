@@ -81,7 +81,7 @@ class OllamaAdapter(BaseLLMAdapter):
 
 # ---------------------------------------------------------------------------
 # Gemini
-# FIX A: changed default model from "gemini-2.0-flash-lite" (does not exist)
+# FIX A: changed default model from "gemini-2.5-flash-lite" (does not exist)
 #        to "gemini-2.5-flash" which is confirmed available in your account.
 # ---------------------------------------------------------------------------
 
