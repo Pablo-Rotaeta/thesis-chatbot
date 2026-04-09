@@ -120,7 +120,7 @@ class UnconstrainedDialogManager:
             messages=messages,
             system_prompt=self._build_system_prompt(),
             temperature=0.7,
-            max_tokens=1024,
+            max_tokens=2048,
         )
 
         is_complete = "[BOOKING_COMPLETE]" in reply
@@ -389,7 +389,7 @@ class SkillBasedDialogManager:
                 messages=messages,
                 system_prompt=system_prompt,
                 temperature=0.4,
-                max_tokens=1024,
+                max_tokens=2048,
             )
             return {
                 "reply": reply,
@@ -483,7 +483,7 @@ class SkillBasedDialogManager:
             messages=messages,
             system_prompt=system_prompt,
             temperature=0.4,
-            max_tokens=1024,
+            max_tokens=2048,
         )
 
         return {

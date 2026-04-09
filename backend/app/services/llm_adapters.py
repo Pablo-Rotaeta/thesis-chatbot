@@ -182,7 +182,7 @@ class AnthropicAdapter(BaseLLMAdapter):
     def model_name(self) -> str:
         return self._model
 
-    async def chat(self, messages, system_prompt, temperature=0.7, max_tokens=512) -> str:
+    async def chat(self, messages, system_prompt, temperature=0.7, max_tokens=2048) -> str:
         payload = {
             "model": self._model,
             "max_tokens": max_tokens,

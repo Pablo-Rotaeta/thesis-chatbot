@@ -29,7 +29,7 @@ export default function Page() {
   const [screen, setScreen] = useState<Screen>("setup");
   const [systemType, setSystemType] = useState<SystemType>("skill_based");
 
-  // FIX B: provider and model are now constants — not state, not passed as props.
+  // FIX B: provider and model - FORCE REBUILD are now constants — not state, not passed as props.
   // The ChatScreen no longer needs them as props.
   const PROVIDER: Provider = "gemini";
   const MODEL = "gemini-2.5-flash";
