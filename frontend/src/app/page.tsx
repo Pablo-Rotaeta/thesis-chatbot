@@ -9,9 +9,9 @@ interface Msg { role: "user" | "assistant"; content: string; ts: number; }
 type Screen = "setup" | "chat" | "questionnaire" | "done";
 
 // ─── Questionnaire questions ──────────────────────────────────────────────────
-// FIX D: Edit the question text here to change what participants see.
+// Edit question text here to change what participants see.
 // type "yn"    = Yes/No buttons
-// type "scale" = 1–5 scale (Instämmer ej → Instämmer)
+// type "scale" = 1–5 scale (Disagree → Agree)
 
 const UES_QUESTIONS = [
   { id: "a1", label: "Did the system complete the intended task?", type: "yn" },
@@ -23,14 +23,14 @@ const UES_QUESTIONS = [
   { id: "b5", label: "I found the system easy to communicate with", type: "scale" },
 ];
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Page() {
   const [screen, setScreen] = useState<Screen>("setup");
   const [systemType, setSystemType] = useState<SystemType>("skill_based");
 
-  // FIX B: provider and model - FORCE REBUILD are now constants — not state, not passed as props.
-  // The ChatScreen no longer needs them as props.
   const PROVIDER: Provider = "gemini";
   const MODEL = "gemini-2.5-flash";
 
@@ -44,9 +44,39 @@ export default function Page() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Keep a ref to msgs so we can access current value inside async callbacks
+  const msgsRef = useRef<Msg[]>([]);
+  useEffect(() => { msgsRef.current = msgs; }, [msgs]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, loading]);
+
+  // ── Shared save function — called from both auto-complete and manual Avsluta ──
+
+  async function saveAndTransition(sid: string, taskSuccess: boolean) {
+    try {
+      // 1. Close the session
+      await endSession(sid, taskSuccess);
+
+      // 2. Save the full conversation log to backend
+      await fetch(`${API_URL}/api/sessions/conversation`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sid,
+          messages: msgsRef.current.map(m => ({
+            role: m.role,
+            content: m.content,
+            timestamp: new Date(m.ts).toISOString(),
+          })),
+        }),
+      });
+    } catch (e) {
+      console.error("Failed to save session:", e);
+    }
+    setScreen("questionnaire");
+  }
 
   // ── Setup ─────────────────────────────────────────────────────────────────
 
@@ -56,7 +86,8 @@ export default function Page() {
     try {
       const res = await startSession(systemType, PROVIDER, MODEL);
       setSessionId(res.session_id);
-      setMsgs([{ role: "assistant", content: res.opening_message, ts: Date.now() }]);
+      const openingMsg = { role: "assistant" as const, content: res.opening_message, ts: Date.now() };
+      setMsgs([openingMsg]);
       setScreen("chat");
       setTimeout(() => inputRef.current?.focus(), 100);
     } catch (e: any) {
@@ -78,14 +109,9 @@ export default function Page() {
       const res = await sendMessage(sessionId, text);
       setMsgs(m => [...m, { role: "assistant", content: res.reply, ts: Date.now() }]);
 
-      // FIX C: both systems now auto-transition to questionnaire when complete.
-      // The skill-based system was previously waiting for an extra manual click.
       if (res.is_complete) {
         setIsComplete(true);
-        setTimeout(async () => {
-          await endSession(sessionId, true);
-          setScreen("questionnaire");
-        }, 2000); // 2s delay so user can read the final confirmation message
+        setTimeout(() => saveAndTransition(sessionId, true), 2000);
       }
     } catch {
       setMsgs(m => [...m, { role: "assistant", content: "⚠️ Ett fel uppstod. Försök igen.", ts: Date.now() }]);
@@ -95,10 +121,9 @@ export default function Page() {
     }
   }, [input, loading, isComplete, sessionId]);
 
-  // Manual finish button (shown while conversation is active, as fallback)
+  // Manual finish — user clicks Avsluta mid-conversation
   async function handleFinish() {
-    await endSession(sessionId, isComplete);
-    setScreen("questionnaire");
+    await saveAndTransition(sessionId, false);
   }
 
   // ── Questionnaire ──────────────────────────────────────────────────────────
@@ -108,19 +133,29 @@ export default function Page() {
   }
 
   async function handleSubmitQuestionnaire() {
-    console.log("Questionnaire answers:", { session_id: sessionId, ...answers });
+    try {
+      await fetch(`${API_URL}/api/sessions/questionnaire`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          answers,
+          task_success: answers["a1"] === "Yes",
+        }),
+      });
+    } catch (e) {
+      console.error("Failed to save questionnaire:", e);
+    }
     setScreen("done");
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
-  // FIX B: SetupScreen no longer receives provider/model props
   if (screen === "setup") return <SetupScreen
     systemType={systemType} setSystemType={setSystemType}
     onStart={handleStart} loading={loading} error={error}
   />;
 
-  // FIX B: ChatScreen no longer receives provider prop (was causing crash)
   if (screen === "chat") return <ChatScreen
     msgs={msgs} loading={loading} input={input}
     setInput={setInput} onSend={handleSend} onFinish={handleFinish}
@@ -137,13 +172,11 @@ export default function Page() {
 }
 
 // ─── Setup Screen ──────────────────────────────────────────────────────────────
-// FIX B: removed provider/model fields entirely from the UI
 
 function SetupScreen({ systemType, setSystemType, onStart, loading, error }: any) {
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }}>
       <div style={{ width: "100%", maxWidth: 460, background: "var(--surface)", borderRadius: "var(--radius)", border: "1px solid var(--border)", padding: "40px 36px", boxShadow: "var(--shadow)" }}>
-
         <div style={{ marginBottom: 32 }}>
           <div style={{ fontSize: 13, fontWeight: 500, color: "var(--accent)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>
             Stockholms Bilverkstad
@@ -153,7 +186,6 @@ function SetupScreen({ systemType, setSystemType, onStart, loading, error }: any
             Välj systemtyp och starta sedan konversationen.
           </p>
         </div>
-
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           <Field label="Systemtyp">
             <ToggleGroup
@@ -164,11 +196,9 @@ function SetupScreen({ systemType, setSystemType, onStart, loading, error }: any
               value={systemType} onChange={setSystemType}
             />
           </Field>
-
           {error && (
             <div style={{ padding: "10px 14px", borderRadius: 10, background: "#FEF2F2", color: "#B91C1C", fontSize: 13 }}>{error}</div>
           )}
-
           <button onClick={onStart} disabled={loading}
             style={{ padding: "13px 24px", borderRadius: 12, background: loading ? "#93A3D8" : "var(--accent)", color: "#fff", fontSize: 15, fontWeight: 600, transition: "background 0.15s" }}>
             {loading ? "Startar…" : "Starta konversation →"}
@@ -180,13 +210,10 @@ function SetupScreen({ systemType, setSystemType, onStart, loading, error }: any
 }
 
 // ─── Chat Screen ───────────────────────────────────────────────────────────────
-// FIX B: removed provider prop
 
 function ChatScreen({ msgs, loading, input, setInput, onSend, onFinish, inputRef, bottomRef, isComplete, systemType }: any) {
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", maxWidth: 680, margin: "0 auto" }}>
-
-      {/* Header */}
       <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", background: "var(--surface)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontWeight: 600, fontSize: 15 }}>Bilverkstad – Boka tid</div>
@@ -194,7 +221,6 @@ function ChatScreen({ msgs, loading, input, setInput, onSend, onFinish, inputRef
             {systemType === "skill_based" ? "Skill-based" : "Fri LLM"}
           </div>
         </div>
-        {/* Manual finish button — only shown if conversation is active (fallback) */}
         {!isComplete && (
           <button onClick={onFinish}
             style={{ padding: "8px 16px", borderRadius: 10, background: "var(--border)", color: "var(--muted)", fontSize: 13, fontWeight: 600 }}>
@@ -203,7 +229,6 @@ function ChatScreen({ msgs, loading, input, setInput, onSend, onFinish, inputRef
         )}
       </div>
 
-      {/* Messages */}
       <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
         {msgs.map((m: Msg, i: number) => (
           <div key={i} className="fade-up" style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
@@ -236,17 +261,14 @@ function ChatScreen({ msgs, loading, input, setInput, onSend, onFinish, inputRef
           </div>
         )}
 
-        {/* FIX C: removed the manual "Avsluta & betygsätt" message — transition is now automatic */}
         {isComplete && (
           <div className="fade-up" style={{ textAlign: "center", padding: "16px", color: "var(--muted)", fontSize: 13 }}>
             Bokningen är klar! Du omdirigeras till utvärderingen...
           </div>
         )}
-
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
       <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border)", background: "var(--surface)", display: "flex", gap: 10 }}>
         <input
           ref={inputRef}
@@ -278,7 +300,6 @@ function QuestionnaireScreen({ answers, onAnswer, onSubmit, sessionId }: any) {
           <h2 style={{ fontSize: 22, fontWeight: 600, marginBottom: 6 }}>How did you experience the conversation?</h2>
           <p style={{ fontSize: 13, color: "var(--muted)" }}>Session: <code style={{ fontFamily: "'DM Mono', monospace", fontSize: 12 }}>{sessionId.slice(0, 8)}</code></p>
         </div>
-
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
           {UES_QUESTIONS.map(q => (
             <div key={q.id}>
@@ -306,7 +327,6 @@ function QuestionnaireScreen({ answers, onAnswer, onSubmit, sessionId }: any) {
               )}
             </div>
           ))}
-
           <button onClick={onSubmit} disabled={!allAnswered}
             style={{ padding: "13px 24px", borderRadius: 12, background: allAnswered ? "var(--accent)" : "var(--border)", color: allAnswered ? "#fff" : "var(--muted)", fontSize: 15, fontWeight: 600, transition: "all 0.15s", marginTop: 8 }}>
             Submit

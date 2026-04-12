@@ -1,10 +1,10 @@
 """
-Dialog Managers
-===============
-Two implementations sharing the same LLM adapter interface:
-
-  UnconstrainedDialogManager  — single system prompt, LLM has full freedom
-  SkillBasedDialogManager     — step-by-step skill execution with slot filling
+Dialog Managers — fixed version
+Fixes:
+  1. TypeError: 'in <string>' requires string as left operand, not bool
+     — caused by YAML parsing true_values/false_values as Python booleans
+  2. Name/phone collection loop — now accepts name and phone in any order,
+     in the same message or separate messages, with clearer prompting
 """
 
 import json, re, uuid, yaml
@@ -58,39 +58,36 @@ def format_slots_by_day(slots: List[str]) -> str:
 UNCONSTRAINED_SYSTEM = """Du är en bokningsassistent för en bilverkstad i Stockholmsområdet.
 Du hjälper kunder att boka tider för bilservice och reparationer.
 Du MÅSTE alltid svara på svenska, oavsett vilket språk användaren skriver på.
- 
+
 Tillgängliga verkstäder:
 {locations}
- 
+
 Tillgängliga tjänster: {services}
- 
+
 Lediga tider per verkstad:
 {slots}
- 
-Hjälp kunden att boka en tid. Du behöver samla in:
-- Typ av ärende
-- Önskad verkstad
-- Datum och tid
-- Kundens namn och telefonnummer
- 
+
 Inled konversationen med ett kort, neutralt välkomstmeddelande och fråga vad
-du kan hjälpa kunden med. Nämn INTE specifika tjänster eller alternativ i
-välkomstmeddelandet — låt kunden beskriva sitt ärende med egna ord.
- 
+du kan hjälpa kunden med. Nämn INTE specifika tjänster i välkomstmeddelandet.
+
+Du behöver samla in EXAKT dessa uppgifter — inget annat:
+1. Typ av ärende (service, däckbyte, bromsar, AC, besiktning eller annat)
+2. Önskad verkstad (välj från listan ovan)
+3. Datum och tid (välj från lediga tider ovan)
+4. Kundens namn
+5. Kundens telefonnummer
+
+Fråga INTE om registreringsnummer, bilmärke, årsmodell eller annan information.
+Samla ENDAST in de 5 punkterna ovan.
+
 När du har all information, bekräfta bokningen och ge en bokningsreferens.
 Var hjälpsam och naturlig i konversationen.
- 
-När bokningen är HELT bekräftad (ärende, verkstad, tid, namn och telefon alla
-insamlade och bekräftade för kunden), avsluta ditt svar med exakt denna token
-på en egen rad: [BOOKING_COMPLETE]
+
+När bokningen är HELT bekräftad, avsluta ditt svar med exakt denna token på en egen rad: [BOOKING_COMPLETE]
 Fortsätt INTE konversationen efter att du skrivit [BOOKING_COMPLETE]."""
 
 
 class UnconstrainedDialogManager:
-    """
-    Fully prompt-driven. The LLM decides how to handle the conversation.
-    This is the BASELINE (system A) in the thesis comparison.
-    """
 
     def __init__(self, adapter: BaseLLMAdapter):
         self.adapter = adapter
@@ -108,11 +105,7 @@ class UnconstrainedDialogManager:
             slots="\n".join(all_slots),
         )
 
-    async def respond(
-        self,
-        conversation_history: List[Dict],
-        user_message: str,
-    ) -> Dict:
+    async def respond(self, conversation_history: List[Dict], user_message: str) -> Dict:
         messages = [Message(m["role"], m["content"]) for m in conversation_history]
         messages.append(Message("user", user_message))
 
@@ -144,7 +137,6 @@ SKILL_PATH = Path(__file__).parent.parent / "skills" / "boka_bilverkstad.yaml"
 
 
 class SkillState:
-    """Tracks progress through the skill steps and collected slot values."""
 
     def __init__(self):
         self.current_step_index: int = 0
@@ -171,18 +163,6 @@ class SkillState:
 
 
 class SkillBasedDialogManager:
-    """
-    Executes the YAML skill step by step.
-    This is the CONSTRAINED system (system B) in the thesis comparison.
-
-    Flow per turn:
-      1. Load state from session
-      2. Try to extract the expected slot from user's message
-      3. If valid → advance to next step, build next prompt
-      4. If invalid → retry with on_invalid instruction
-      5. Call any Python handler (e.g. fetch available slots)
-      6. Build a tightly scoped system prompt for the current step only
-    """
 
     def __init__(self, adapter: BaseLLMAdapter):
         self.adapter = adapter
@@ -197,57 +177,41 @@ class SkillBasedDialogManager:
             return self.steps[index]
         return None
 
-    # -- Slot extraction ----------------------------------------------------
-
     def _extract_slot(self, step: Dict, user_message: str) -> Optional[str]:
-        """Try to extract and validate the expected slot from user input."""
         validation = step.get("validation", {})
         vtype = validation.get("type")
         msg_lower = user_message.lower().strip()
 
         if vtype == "enum":
-            options = validation["options"]
+            options = [str(o) for o in validation.get("options", [])]
             fuzzy = validation.get("fuzzy_match", False)
-            # Direct match
             for opt in options:
                 if opt in msg_lower:
                     return opt
-            # Fuzzy synonyms
             if fuzzy:
                 synonyms = {
-                    "service": ["olja", "oljebyte", "oljia", "olj", "olje", "service", "filter", "kontroll", "servis"],
-                    "däckbyte": ["däck", "dack", "hjul", "sommar", "vinter", "dubb", "däckbyte", "dackbyte"],
-                    "bromsar": ["broms", "bromsa", "bromsskiva", "belägg", "bromsarna"],
+                    "service": ["olja", "oljebyte", "service", "filter", "kontroll", "servis"],
+                    "däckbyte": ["däck", "dack", "hjul", "sommar", "vinter", "dubb"],
+                    "bromsar": ["broms", "bromsa", "bromsskiva", "belägg"],
                     "ac": ["ac", "luft", "kyla", "klimat", "luftkonditionering", "a/c"],
-                    "besiktning": ["besiktning", "besikta", "kontrollbesiktning", "besiktnings"],
-                    "annat": ["annat", "diagnos", "fel", "ljud", "problem", "övrigt"],
-                    "vasastan": ["vasastan", "uppland", "vasa", "norr", "upplandsgatan"],
-                    "sodermalm": ["söder", "södermalm", "hornsgatan", "horn", "sodermalm", "sodra", "södra"],
+                    "besiktning": ["besiktning", "besikta", "kontrollbesiktning"],
+                    "annat": ["annat", "diagnos", "fel", "ljud", "problem"],
+                    "vasastan": ["vasastan", "uppland", "vasa", "upplandsgatan"],
+                    "sodermalm": ["söder", "södermalm", "hornsgatan", "horn", "sodermalm"],
                     "nacka": ["nacka", "värmdö", "värmdövägen"],
-                    "solna": ["solna", "frösunda", "norra", "frosunda"],
-                    "ja": ["ja", "yes", "ok", "okej", "stämmer", "rätt", "bekräfta", "correct", "japp", "jo"],
+                    "solna": ["solna", "frösunda", "norra"],
+                    "ja": ["ja", "yes", "ok", "okej", "stämmer", "rätt", "bekräfta", "japp", "jo", "correct"],
                     "nej": ["nej", "no", "fel", "ändra", "avbryt", "cancel", "nope"],
                 }
                 for opt, syns in synonyms.items():
                     if opt in options and any(s in msg_lower for s in syns):
                         return opt
-            # Secondary keyword fallback for typos
-            service_keywords = {
-                "service": ["serv", "oil", "olja", "filter", "kontroll"],
-                "däckbyte": ["dack", "däck", "tire", "hjul"],
-                "bromsar": ["brom"],
-                "ac": ["klim", "cool", "ac"],
-                "besiktning": ["besikt", "inspect"],
-                "annat": ["annat", "other", "diag"],
-            }
-            for opt, keywords in service_keywords.items():
-                if opt in options and any(kw in msg_lower for kw in keywords):
-                    return opt
             return None
 
         elif vtype == "boolean":
-            true_vals = validation.get("true_values", ["ja"])
-            false_vals = validation.get("false_values", ["nej"])
+            # FIX: convert all values to strings to avoid TypeError when YAML parses as bool
+            true_vals = [str(v).lower() for v in validation.get("true_values", ["ja"])]
+            false_vals = [str(v).lower() for v in validation.get("false_values", ["nej"])]
             if any(v in msg_lower for v in true_vals):
                 return "ja"
             if any(v in msg_lower for v in false_vals):
@@ -262,7 +226,6 @@ class SkillBasedDialogManager:
                 date_part, time_part = slot.split(" ")
                 if time_part in msg_lower or date_part in msg_lower:
                     return slot
-            # Try partial time match like "08:00" or "8"
             time_pattern = re.search(r"\b(\d{1,2})[:\.]?(\d{0,2})\b", user_message)
             if time_pattern:
                 hour = time_pattern.group(1).zfill(2)
@@ -275,23 +238,18 @@ class SkillBasedDialogManager:
 
         elif vtype == "regex":
             pattern = validation.get("pattern", ".*")
-            if re.match(pattern, msg_lower):
+            if re.match(pattern, user_message.strip()):
                 return user_message.strip()
             return None
 
-        # No validation = always accept
         return user_message.strip() if user_message.strip() else None
 
-    # -- Python handlers ----------------------------------------------------
-
     def _run_handler(self, handler_name: str, state: SkillState) -> str:
-        """Run a Python handler and return context to inject into the prompt."""
         if handler_name == "get_available_slots":
             loc_id = state.slots.get("location_id", "")
             slots = self.data["available_slots"].get(loc_id, [])
             loc_name = next(
-                (l["name"] for l in self.data["locations"] if l["id"] == loc_id),
-                loc_id,
+                (l["name"] for l in self.data["locations"] if l["id"] == loc_id), loc_id,
             )
             if slots:
                 return f"Lediga tider på {loc_name}:\n{format_slots_by_day(slots)}"
@@ -309,8 +267,6 @@ class SkillBasedDialogManager:
                 f"Telefon: {loc.get('phone', '')}"
             )
         return ""
-
-    # -- Prompt building ----------------------------------------------------
 
     def _build_step_prompt(self, step: Dict, state: SkillState, handler_context: str = "") -> str:
         global_ctx = self.skill["system_context"]
@@ -343,7 +299,39 @@ class SkillBasedDialogManager:
         ]
         return "\n".join(parts)
 
-    # -- Main respond method ------------------------------------------------
+    def _extract_name_and_phone(self, user_message: str, state: SkillState):
+        """
+        FIX: Improved name/phone extraction.
+        Handles same-message or separate-message input.
+        Phone is detected by digits/+/- pattern.
+        Name is everything that is NOT the phone number.
+        """
+        msg = user_message.strip()
+
+        # Detect phone: 7+ digits, may include +, -, spaces
+        phone_pattern = re.compile(r'[\+]?[\d\s\-]{7,15}')
+        phone_match = phone_pattern.search(msg)
+
+        if phone_match:
+            phone = re.sub(r'\s+', '', phone_match.group()).strip()
+            # Remove phone from message to get name
+            name_part = msg[:phone_match.start()] + msg[phone_match.end():]
+            name_part = re.sub(r'\s+', ' ', name_part).strip()
+            # Remove common filler words
+            for filler in ["mitt namn är", "jag heter", "my name is", "namn:", "telefon:", "tel:"]:
+                name_part = name_part.lower().replace(filler, "").strip()
+            name_part = name_part.strip(" ,.-")
+
+            if phone and len(phone) >= 7:
+                if "customer_phone" not in state.slots:
+                    state.slots["customer_phone"] = phone
+            if name_part and len(name_part) >= 2:
+                if "customer_name" not in state.slots:
+                    state.slots["customer_name"] = name_part.title()
+        else:
+            # No phone detected — treat as name if name not yet collected
+            if "customer_name" not in state.slots and len(msg) >= 2:
+                state.slots["customer_name"] = msg.title()
 
     async def respond(
         self,
@@ -351,14 +339,12 @@ class SkillBasedDialogManager:
         user_message: str,
         state_dict: Optional[Dict] = None,
     ) -> Dict:
-        # Restore or create state
         self.current_state = SkillState.from_dict(state_dict) if state_dict else SkillState()
         state = self.current_state
 
         step = self._get_step(state.current_step_index)
 
         if step is None:
-            # Skill complete — should not happen in normal flow
             return {
                 "reply": "Tack för din bokning! Är det något annat jag kan hjälpa dig med?",
                 "system_state": state.to_dict(),
@@ -367,29 +353,22 @@ class SkillBasedDialogManager:
                 "is_complete": True,
             }
 
-        # First turn: just greet, no extraction needed
         is_first_turn = len(conversation_history) == 0
-
         handler_context = ""
 
-        # ── Terminal step (slot: null) ──────────────────────────────────────
-        # Steps like "finalize" have no slot to extract — run handler,
-        # generate the closing message, and mark the conversation complete.
+        # ── Terminal step (no slot) ───────────────────────────────────────────
         if not is_first_turn and step.get("slot") is None and not step.get("slots"):
             if step.get("handler"):
                 handler_context = self._run_handler(step["handler"], state)
 
-            state.current_step_index += 1  # mark as done in state
-
+            state.current_step_index += 1
             messages = [Message(m["role"], m["content"]) for m in conversation_history]
             messages.append(Message("user", user_message))
             system_prompt = self._build_step_prompt(step, state, handler_context)
 
             reply = await self.adapter.chat(
-                messages=messages,
-                system_prompt=system_prompt,
-                temperature=0.4,
-                max_tokens=2048,
+                messages=messages, system_prompt=system_prompt,
+                temperature=0.4, max_tokens=2048,
             )
             return {
                 "reply": reply,
@@ -399,7 +378,7 @@ class SkillBasedDialogManager:
                 "is_complete": True,
             }
 
-        # ── Single-slot step ────────────────────────────────────────────────
+        # ── Single-slot step ─────────────────────────────────────────────────
         elif not is_first_turn and step.get("slot"):
             extracted = self._extract_slot(step, user_message)
 
@@ -409,7 +388,6 @@ class SkillBasedDialogManager:
                 state.retry_count = 0
                 state.current_step_index += 1
 
-                # Advance to next step
                 step = self._get_step(state.current_step_index)
                 if step is None:
                     return {
@@ -419,43 +397,20 @@ class SkillBasedDialogManager:
                         "current_step": "complete",
                         "is_complete": True,
                     }
-
-                # Run handler for new step if defined
                 if step.get("handler"):
                     handler_context = self._run_handler(step["handler"], state)
             else:
-                # Slot extraction failed
                 state.retry_count += 1
                 max_retries = self.recovery.get("max_retries_per_slot", 3)
                 if state.retry_count >= max_retries:
                     state.retry_count = 0
                     step = {**step, "instruction": self.recovery["fallback_instruction"]}
 
-        # ── Multi-slot step ─────────────────────────────────────────────────
+        # ── Multi-slot step (name + phone) ───────────────────────────────────
         elif not is_first_turn and step.get("slots"):
-            for slot_key in step["slots"]:
-                if slot_key in state.slots:
-                    continue  # already collected, do not overwrite
+            # FIX: use improved extraction that handles both in one message
+            self._extract_name_and_phone(user_message, state)
 
-                sub_validation = step.get("validation", {}).get(slot_key, {})
-
-                if not sub_validation:
-                    # No validation defined — use heuristic to avoid mixing
-                    # name and phone when they arrive in separate turns
-                    is_phone_input = bool(re.match(r"^[0-9+\-\s]{7,15}$", user_message.strip()))
-                    if slot_key == "customer_name" and not is_phone_input:
-                        state.slots[slot_key] = user_message.strip()
-                    elif slot_key == "customer_phone" and is_phone_input:
-                        state.slots[slot_key] = user_message.strip()
-                else:
-                    extracted = self._extract_slot(
-                        {**step, "slot": slot_key, "validation": sub_validation},
-                        user_message,
-                    )
-                    if extracted:
-                        state.slots[slot_key] = extracted
-
-            # Check if all required slots are filled
             if all(k in state.slots for k in step["slots"]):
                 state.current_step_index += 1
                 step = self._get_step(state.current_step_index)
@@ -468,11 +423,9 @@ class SkillBasedDialogManager:
                         "is_complete": True,
                     }
 
-        # Run handler for current step if not already run
         if not handler_context and step.get("handler"):
             handler_context = self._run_handler(step["handler"], state)
 
-        # Build prompt and get reply
         messages = [Message(m["role"], m["content"]) for m in conversation_history]
         if not is_first_turn:
             messages.append(Message("user", user_message))
@@ -480,10 +433,8 @@ class SkillBasedDialogManager:
         system_prompt = self._build_step_prompt(step, state, handler_context)
 
         reply = await self.adapter.chat(
-            messages=messages,
-            system_prompt=system_prompt,
-            temperature=0.4,
-            max_tokens=2048,
+            messages=messages, system_prompt=system_prompt,
+            temperature=0.4, max_tokens=2048,
         )
 
         return {
