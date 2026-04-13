@@ -205,7 +205,14 @@ http://localhost:8000/api/sessions/
 ### Exporting data for analysis
 
 ```
-http://localhost:8000/api/sessions/export/csv
+# Complete data
+http://localhost:8000/api/sessions/export/combined-csv
+
+# Logs
+http://localhost:8000/api/sessions/export/conversations-csv
+
+# Questionnaires
+http://localhost:8000/api/sessions/export/questionnaires-csv
 ```
 
 ---
