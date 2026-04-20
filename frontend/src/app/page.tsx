@@ -74,10 +74,6 @@ export default function Page() {
     }
   }
 
-  // Keep a ref to msgs so we can access current value inside async callbacks
-  const msgsRef = useRef<Msg[]>([]);
-  useEffect(() => { msgsRef.current = msgs; }, [msgs]);
-
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, loading]);
