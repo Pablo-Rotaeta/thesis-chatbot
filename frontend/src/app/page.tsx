@@ -43,6 +43,36 @@ export default function Page() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const msgsRef = useRef<Msg[]>([]);
+  useEffect(() => { msgsRef.current = msgs; }, [msgs]);
+
+  // ── Read URL params and auto-start if system type is provided ──────────────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sys = params.get("system");
+    if (sys === "skill_based" || sys === "unconstrained") {
+      setSystemType(sys as SystemType);
+      // Auto-start immediately — skip the setup screen
+      autoStart(sys as SystemType);
+    }
+  }, []);
+
+  async function autoStart(sys: SystemType) {
+    setError("");
+    setLoading(true);
+    try {
+      const res = await startSession(sys, PROVIDER, MODEL);
+      setSessionId(res.session_id);
+      setMsgs([{ role: "assistant", content: res.opening_message, ts: Date.now() }]);
+      setScreen("chat");
+      setTimeout(() => inputRef.current?.focus(), 100);
+    } catch (e: any) {
+      setError("Kunde inte starta sessionen. Kontrollera att backend är igång.");
+      setScreen("setup"); // fall back to setup screen if auto-start fails
+    } finally {
+      setLoading(false);
+    }
+  }
 
   // Keep a ref to msgs so we can access current value inside async callbacks
   const msgsRef = useRef<Msg[]>([]);
