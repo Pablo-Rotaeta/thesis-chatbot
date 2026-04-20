@@ -3,6 +3,7 @@ LLM Adapter Layer
 """
 
 from abc import ABC, abstractmethod
+from pyexpat.errors import messages
 from typing import List, Dict, Optional
 import os, httpx
 
@@ -100,37 +101,37 @@ class GeminiAdapter(BaseLLMAdapter):
         return self._model
 
     async def chat(self, messages, system_prompt, temperature=0.7, max_tokens=512) -> str:
-    import asyncio
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{self._model}:generateContent?key={self.api_key}"
-    )
-    full_prompt = system_prompt + "\n\n"
-    for m in messages:
-        if m.role == "user":
-            full_prompt += f"User: {m.content}\n"
-        elif m.role == "assistant":
-            full_prompt += f"Assistant: {m.content}\n"
+        import asyncio
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{self._model}:generateContent?key={self.api_key}"
+        )
+        full_prompt = system_prompt + "\n\n"
+        for m in messages:
+            if m.role == "user":
+                full_prompt += f"User: {m.content}\n"
+            elif m.role == "assistant":
+                full_prompt += f"Assistant: {m.content}\n"
 
-    payload = {
-        "contents": [{"parts": [{"text": full_prompt}]}],
-        "generationConfig": {
-            "temperature": temperature,
-            "maxOutputTokens": max_tokens,
-        },
-    }
+        payload = {
+            "contents": [{"parts": [{"text": full_prompt}]}],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+            },
+        }
 
-    for attempt in range(4):
-        async with httpx.AsyncClient(timeout=60) as client:
-            r = await client.post(url, json=payload)
-            if r.status_code in (503, 429) and attempt < 3:
-                wait = 2 ** attempt
-                print(f"Gemini {r.status_code}, retrying in {wait}s (attempt {attempt+1}/4)")
-                await asyncio.sleep(wait)
-                continue
-            r.raise_for_status()
-            data = r.json()
-            return data["candidates"][0]["content"]["parts"][0]["text"]
+        for attempt in range(4):
+            async with httpx.AsyncClient(timeout=60) as client:
+                r = await client.post(url, json=payload)
+                if r.status_code in (503, 429) and attempt < 3:
+                    wait = 2 ** attempt
+                    print(f"Gemini {r.status_code}, retrying in {wait}s (attempt {attempt+1}/4)")
+                    await asyncio.sleep(wait)
+                    continue
+                r.raise_for_status()
+                data = r.json()
+                return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
 # ---------------------------------------------------------------------------
