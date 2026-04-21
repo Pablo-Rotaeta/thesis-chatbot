@@ -2,7 +2,9 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-:root {
+/* ── System A (Unconstrained) — Blue theme ── */
+:root,
+[data-system="unconstrained"] {
   --bg:        #F5F4F0;
   --surface:   #FFFFFF;
   --border:    #E2E0DA;
@@ -17,21 +19,27 @@
   --shadow:    0 2px 16px rgba(0,0,0,0.07);
 }
 
+/* ── System B (Skill-based) — Green theme ── */
+[data-system="skill_based"] {
+  --bg:        #F2F5F2;
+  --surface:   #FFFFFF;
+  --border:    #D8E4D8;
+  --text:      #1A1916;
+  --muted:     #6A7A6A;
+  --accent:    #1A7340;
+  --accent-lt: #ECFDF5;
+  --bot-bg:    #FFFFFF;
+  --user-bg:   #1A7340;
+  --user-text: #FFFFFF;
+  --radius:    16px;
+  --shadow:    0 2px 16px rgba(0,0,0,0.07);
+}
+
 html, body { height: 100%; font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); }
 
-button {
-  font-family: inherit;
-  cursor: pointer;
-  border: none;
-  outline: none;
-}
+button { font-family: inherit; cursor: pointer; border: none; outline: none; }
+input, select { font-family: inherit; outline: none; }
 
-input, select {
-  font-family: inherit;
-  outline: none;
-}
-
-/* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }

@@ -8,10 +8,17 @@ import { startSession, sendMessage, endSession, SystemType, Provider } from "@/l
 interface Msg { role: "user" | "assistant"; content: string; ts: number; }
 type Screen = "setup" | "chat" | "questionnaire" | "done";
 
+// ─── System display names ─────────────────────────────────────────────────────
+// Blinded labels — participants see "System A" and "System B" only.
+// unconstrained = System A (blue)
+// skill_based   = System B (green)
+
+const SYSTEM_LABEL: Record<SystemType, string> = {
+  unconstrained: "System A",
+  skill_based:   "System B",
+};
+
 // ─── Questionnaire questions ──────────────────────────────────────────────────
-// Edit question text here to change what participants see.
-// type "yn"    = Yes/No buttons
-// type "scale" = 1–5 scale (Disagree → Agree)
 
 const UES_QUESTIONS = [
   { id: "a1", label: "Did the system complete the intended task?", type: "yn" },
@@ -46,13 +53,22 @@ export default function Page() {
   const msgsRef = useRef<Msg[]>([]);
   useEffect(() => { msgsRef.current = msgs; }, [msgs]);
 
-  // ── Read URL params and auto-start if system type is provided ──────────────
+  // Apply color theme to document root based on system type
+  useEffect(() => {
+    document.documentElement.setAttribute("data-system", systemType);
+  }, [systemType]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs, loading]);
+
+  // ── Read URL params and auto-start ────────────────────────────────────────
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sys = params.get("system");
     if (sys === "skill_based" || sys === "unconstrained") {
       setSystemType(sys as SystemType);
-      // Auto-start immediately — skip the setup screen
       autoStart(sys as SystemType);
     }
   }, []);
@@ -63,29 +79,22 @@ export default function Page() {
     try {
       const res = await startSession(sys, PROVIDER, MODEL);
       setSessionId(res.session_id);
-      setMsgs([{ role: "assistant", content: res.opening_message, ts: Date.now() }]);
+      setMsgs([{ role: "assistant" as const, content: res.opening_message, ts: Date.now() }]);
       setScreen("chat");
       setTimeout(() => inputRef.current?.focus(), 100);
     } catch (e: any) {
       setError("Kunde inte starta sessionen. Kontrollera att backend är igång.");
-      setScreen("setup"); // fall back to setup screen if auto-start fails
+      setScreen("setup");
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [msgs, loading]);
-
-  // ── Shared save function — called from both auto-complete and manual Avsluta ──
+  // ── Shared save + transition ───────────────────────────────────────────────
 
   async function saveAndTransition(sid: string, taskSuccess: boolean) {
     try {
-      // 1. Close the session
       await endSession(sid, taskSuccess);
-
-      // 2. Save the full conversation log to backend
       await fetch(`${API_URL}/api/sessions/conversation`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -134,7 +143,6 @@ export default function Page() {
     try {
       const res = await sendMessage(sessionId, text);
       setMsgs(m => [...m, { role: "assistant", content: res.reply, ts: Date.now() }]);
-
       if (res.is_complete) {
         setIsComplete(true);
         setTimeout(() => saveAndTransition(sessionId, true), 2000);
@@ -147,7 +155,6 @@ export default function Page() {
     }
   }, [input, loading, isComplete, sessionId]);
 
-  // Manual finish — user clicks Avsluta mid-conversation
   async function handleFinish() {
     await saveAndTransition(sessionId, false);
   }
@@ -177,6 +184,16 @@ export default function Page() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
+  // Loading screen while auto-starting from URL param
+  if (screen === "setup" && loading) return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ textAlign: "center", color: "var(--muted)", fontSize: 15 }}>
+        <div style={{ fontSize: 32, marginBottom: 16 }}>🔧</div>
+        Startar konversation…
+      </div>
+    </div>
+  );
+
   if (screen === "setup") return <SetupScreen
     systemType={systemType} setSystemType={setSystemType}
     onStart={handleStart} loading={loading} error={error}
@@ -191,7 +208,7 @@ export default function Page() {
 
   if (screen === "questionnaire") return <QuestionnaireScreen
     answers={answers} onAnswer={handleAnswer} onSubmit={handleSubmitQuestionnaire}
-    sessionId={sessionId}
+    sessionId={sessionId} systemType={systemType}
   />;
 
   return <DoneScreen />;
@@ -209,15 +226,15 @@ function SetupScreen({ systemType, setSystemType, onStart, loading, error }: any
           </div>
           <h1 style={{ fontSize: 26, fontWeight: 600, lineHeight: 1.2, marginBottom: 8 }}>Boka din tid</h1>
           <p style={{ fontSize: 15, color: "var(--muted)", lineHeight: 1.6 }}>
-            Välj systemtyp och starta sedan konversationen.
+            Välj system och starta sedan konversationen.
           </p>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-          <Field label="Systemtyp">
+          <Field label="System">
             <ToggleGroup
               options={[
-                { value: "skill_based", label: "Skill-based", desc: "Styrd dialog" },
-                { value: "unconstrained", label: "Fri LLM", desc: "Utan begränsning" },
+                { value: "unconstrained", label: "System A", desc: "" },
+                { value: "skill_based",   label: "System B", desc: "" },
               ]}
               value={systemType} onChange={setSystemType}
             />
@@ -238,14 +255,14 @@ function SetupScreen({ systemType, setSystemType, onStart, loading, error }: any
 // ─── Chat Screen ───────────────────────────────────────────────────────────────
 
 function ChatScreen({ msgs, loading, input, setInput, onSend, onFinish, inputRef, bottomRef, isComplete, systemType }: any) {
+  const label = SYSTEM_LABEL[systemType as SystemType] ?? "System";
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", maxWidth: 680, margin: "0 auto" }}>
       <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", background: "var(--surface)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontWeight: 600, fontSize: 15 }}>Bilverkstad – Boka tid</div>
-          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-            {systemType === "skill_based" ? "Skill-based" : "Fri LLM"}
-          </div>
+          {/* Show only "System A" or "System B" — no architectural details */}
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>{label}</div>
         </div>
         {!isComplete && (
           <button onClick={onFinish}
@@ -316,13 +333,14 @@ function ChatScreen({ msgs, loading, input, setInput, onSend, onFinish, inputRef
 
 // ─── Questionnaire ─────────────────────────────────────────────────────────────
 
-function QuestionnaireScreen({ answers, onAnswer, onSubmit, sessionId }: any) {
+function QuestionnaireScreen({ answers, onAnswer, onSubmit, sessionId, systemType }: any) {
   const allAnswered = UES_QUESTIONS.every(q => answers[q.id]);
+  const label = SYSTEM_LABEL[systemType as SystemType] ?? "System";
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }}>
       <div style={{ width: "100%", maxWidth: 520, background: "var(--surface)", borderRadius: "var(--radius)", border: "1px solid var(--border)", padding: "40px 36px", boxShadow: "var(--shadow)" }}>
         <div style={{ marginBottom: 28 }}>
-          <div style={{ fontSize: 13, fontWeight: 500, color: "var(--accent)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>Evaluation</div>
+          <div style={{ fontSize: 13, fontWeight: 500, color: "var(--accent)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>Evaluation — {label}</div>
           <h2 style={{ fontSize: 22, fontWeight: 600, marginBottom: 6 }}>How did you experience the conversation?</h2>
           <p style={{ fontSize: 13, color: "var(--muted)" }}>Session: <code style={{ fontFamily: "'DM Mono', monospace", fontSize: 12 }}>{sessionId.slice(0, 8)}</code></p>
         </div>
@@ -400,7 +418,7 @@ function ToggleGroup({ options, value, onChange }: { options: { value: string; l
         <button key={o.value} onClick={() => onChange(o.value)}
           style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${value === o.value ? "var(--accent)" : "var(--border)"}`, background: value === o.value ? "var(--accent-lt)" : "transparent", color: value === o.value ? "var(--accent)" : "var(--text)", textAlign: "left", transition: "all 0.1s" }}>
           <div style={{ fontWeight: 600, fontSize: 13 }}>{o.label}</div>
-          <div style={{ fontSize: 11, color: value === o.value ? "var(--accent)" : "var(--muted)", marginTop: 2 }}>{o.desc}</div>
+          {o.desc && <div style={{ fontSize: 11, color: value === o.value ? "var(--accent)" : "var(--muted)", marginTop: 2 }}>{o.desc}</div>}
         </button>
       ))}
     </div>
