@@ -193,12 +193,100 @@ class SkillBasedDialogManager:
                     return opt
             if fuzzy:
                 synonyms = {
-                    "service":    ["olja", "oljebyte", "service", "filter", "kontroll", "servis"],
-                    "däckbyte":   ["däck", "dack", "hjul", "sommar", "vinter", "dubb"],
-                    "bromsar":    ["broms", "bromsa", "bromsskiva", "belägg"],
-                    "ac":         ["ac", "luft", "kyla", "klimat", "luftkonditionering", "a/c"],
-                    "besiktning": ["besiktning", "besikta", "kontrollbesiktning"],
-                    "annat":      ["annat", "diagnos", "fel", "ljud", "problem"],
+                    "service": [
+                        "olja", "oljebyte", "oljeservice", "service", "servis", "filter",
+                        "oljefilter", "luftfilter", "kupéfilter", "bränslefilter",
+                        "kontroll", "genomgång", "översyn", "inspektion",
+                        "servicebok", "årsservice", "mellanservice", "fullservice",
+                        "tändstift", "kamrem", "kamkedja", "rembyte", "vätskebyte",
+                        "kylarvätska", "spolarvätska", "bromsvätska",
+                        "underhåll", "check", "bilservice", "serviceintervall"
+                    ],
+                    
+                    "däckbyte": [
+                        "däck", "dack", "hjul", "hjulbyte", "däckbyte",
+                        "sommar", "sommardäck", "vinter", "vinterdäck",
+                        "dubbdäck", "dubb", "friktion", "året-runt-däck",
+                        "balansering", "hjulbalansering", "däckskifte",
+                        "punktering", "punka", "läckage", "lufttryck",
+                        "slitna däck", "mönsterdjup", "däcksensor", "tpms",
+                        "fälg", "fälgar", "hjulinställning", "spårning"
+                    ],
+                    
+                    "bromsar": [
+                        "broms", "bromsar", "bromsa", "inbromsning",
+                        "bromsskiva", "bromsskivor", "bromsbelägg", "belägg",
+                        "bromsok", "bromsvätska", "handbroms", "parkeringsbroms",
+                        "gnissel", "gnisslar", "skrik", "skrapljud",
+                        "vibration broms", "skakar vid bromsning",
+                        "tar dåligt", "dåliga bromsar", "låser sig",
+                        "bromspedal", "mjuk pedal", "hård pedal",
+                        "abs", "abs-lampa", "bromsfel"
+                    ],
+                    
+                    "ac": [
+                        "ac", "a/c", "klimat", "klimatanläggning",
+                        "luftkonditionering", "kyla", "kalluft",
+                        "fläkt", "fläktar inte", "blåser varmt", "blåser kallt",
+                        "ingen kyla", "dålig kyla", "ac funkar inte",
+                        "imma", "immar igen", "avfuktning",
+                        "kupétemperatur", "värme", "värmesystem",
+                        "klimatkontroll", "ac-service", "köldmedium"
+                    ],
+                    
+                    "besiktning": [
+                        "besiktning", "besikta", "bilbesiktning",
+                        "kontrollbesiktning", "ombesiktning",
+                        "efterkontroll", "besiktningsfel",
+                        "besiktningsprotokoll", "godkänd", "underkänd",
+                        "tvåa", "2a", "anmärkning", "fel på besiktning",
+                        "släcka 2a", "åtgärda fel",
+                        "inför besiktning", "förbesiktning"
+                    ],
+                    
+                    "annat": [
+                        # generella problem
+                        "annat", "problem", "fel", "diagnos", "felsökning",
+                        "konstigt", "funkar inte", "trasig", "paj", "ur funktion",
+
+                        # ljud & vibrationer
+                        "ljud", "oljud", "låter", "konstigt ljud",
+                        "skrammel", "klonk", "knack", "tickande",
+                        "vinande", "surr", "vibration", "skakar",
+
+                        # motor & drift
+                        "motorproblem", "motorfel", "startar inte",
+                        "svårstartad", "stannar", "dör", "hackar",
+                        "tappar kraft", "rycker", "går ojämnt",
+                        "motorlampa", "check engine", "varningslampa",
+
+                        # glas & kaross
+                        "stenskott", "spricka ruta", "vindruta",
+                        "glasskada", "ruta sprucken",
+
+                        # batteri & el
+                        "batteri", "urladdat batteri", "startproblem",
+                        "startmotor", "generator", "elproblem",
+                        "säkring", "kortslutning",
+
+                        # vätskor & läckage
+                        "läcker", "oljeläckage", "vätskeläckage",
+                        "droppar", "pöl under bilen",
+
+                        # styrning & fjädring
+                        "ratt", "styrning", "drar åt sidan",
+                        "sned", "hjulinställning problem",
+                        "stötdämpare", "fjädring", "guppig",
+
+                        # avgassystem
+                        "avgas", "avgassystem", "luktar avgas",
+                        "hög ljudnivå", "avgasläckage",
+
+                        # koppling & växellåda
+                        "koppling", "slirar", "växellåda",
+                        "svårt växla", "växelproblem", "automatproblem"
+                    ], 
+                          
                     "vasastan":   ["vasastan", "uppland", "vasa", "upplandsgatan"],
                     "sodermalm":  ["söder", "södermalm", "hornsgatan", "horn", "sodermalm"],
                     "nacka":      ["nacka", "värmdö", "värmdövägen"],
@@ -421,20 +509,20 @@ class SkillBasedDialogManager:
                     "is_complete": False,
                 }
             else:
-                # Extraction failed — retry
+                # Extraction failed
                 state.retry_count += 1
                 if state.retry_count >= self.recovery.get("max_retries_per_slot", 3):
                     state.retry_count = 0
-                    step = {**step, "instruction": self.recovery["fallback_instruction"]}
-
+                    # Use hardcoded fallback — no extra Gemini call
+                    return {
+                        "reply": "Förlåt, jag förstod inte riktigt. Kan du beskriva ditt ärende på ett annat sätt? Till exempel: service, däckbyte, bromsar, eller annat.",
+                        "system_state": state.to_dict(),
+                        "slots_filled": state.slots,
+                        "current_step": step["id"],
+                        "is_complete": False,
+                    }
+                # Normal retry — call LLM
                 reply = await self._llm(step, state, conversation_history, user_message)
-                return {
-                    "reply": reply,
-                    "system_state": state.to_dict(),
-                    "slots_filled": state.slots,
-                    "current_step": step["id"],
-                    "is_complete": False,
-                }
 
         # ── Multi-slot step (name + phone) ────────────────────────────────────
         if step.get("slots"):
