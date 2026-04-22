@@ -121,12 +121,12 @@ class GeminiAdapter(BaseLLMAdapter):
             },
         }
 
-        for attempt in range(4):
+        for attempt in range(6):
             async with httpx.AsyncClient(timeout=60) as client:
                 r = await client.post(url, json=payload)
-                if r.status_code in (503, 429) and attempt < 3:
-                    wait = 2 ** attempt
-                    print(f"Gemini {r.status_code}, retrying in {wait}s (attempt {attempt+1}/4)")
+                if r.status_code in (503, 429) and attempt < 5:
+                    wait = min(2 ** attempt, 30)
+                    print(f"Gemini {r.status_code}, retrying in {wait}s (attempt {attempt+1}/6)")
                     await asyncio.sleep(wait)
                     continue
                 r.raise_for_status()
