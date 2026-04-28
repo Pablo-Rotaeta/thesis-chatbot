@@ -30,7 +30,7 @@ WEEKLY_TEMPLATE_PATH = Path(__file__).parent.parent.parent / "data" / "weekly_te
 
 def generate_slots_from_template(days_ahead: int = 14) -> Dict[str, List[str]]:
     """Generate available slots dynamically from the weekly template based on today's date."""
-    with open(WEEKLY_TEMPLATE_PATH) as f:
+    with open(WEEKLY_TEMPLATE_PATH, encoding="utf-8") as f:
         template = json.load(f)
 
     today = datetime.today()
@@ -50,7 +50,7 @@ def generate_slots_from_template(days_ahead: int = 14) -> Dict[str, List[str]]:
 
 
 def load_appointment_data() -> Dict:
-    with open(DATA_PATH) as f:
+    with open(DATA_PATH, encoding="utf-8") as f:
         data = json.load(f)
     # Override available_slots with dynamically generated times based on today's date
     data["available_slots"] = generate_slots_from_template()
@@ -190,7 +190,7 @@ class SkillBasedDialogManager:
     def __init__(self, adapter: BaseLLMAdapter):
         self.adapter = adapter
         self.data = load_appointment_data()
-        with open(SKILL_PATH) as f:
+        with open(SKILL_PATH, encoding="utf-8") as f:
             self.skill = yaml.safe_load(f)
         self.steps = self.skill["steps"]
         self.recovery = self.skill["recovery"]
@@ -220,7 +220,7 @@ class SkillBasedDialogManager:
             if fuzzy:
                 synonyms = {
                     "service": [
-                        "olja", "oljebyte", "oljeservice", "service", "servis", "filter",
+                        "olja", "olje", "oljebyte", "olje byte", "oljeservice", "service", "servis", "filter",
                         "oljefilter", "luftfilter", "kupéfilter", "bränslefilter",
                         "kontroll", "genomgång", "översyn", "inspektion",
                         "servicebok", "årsservice", "mellanservice", "fullservice",
@@ -438,6 +438,13 @@ class SkillBasedDialogManager:
         """
         step_id = step.get("id")
 
+        if step_id == "greet":
+            return (
+                "Välkommen! Jag är din bokningsassistent för bilverkstaden. "
+                "Vad kan jag hjälpa dig med idag? "
+                "Berätta gärna vilket ärende du har."
+            )
+
         if step_id == "collect_location":
             return (
                 "Vilken av våra verkstäder passar dig bäst?\n\n"
@@ -449,6 +456,27 @@ class SkillBasedDialogManager:
 
         if step_id == "collect_date" and handler_context:
             return f"{handler_context}\n\nVilken tid passar dig bäst?"
+
+        if step_id == "collect_name":
+            already_have = []
+            if "customer_name" in state.slots:
+                already_have.append(f"Namn: {state.slots['customer_name']}")
+            if "customer_phone" in state.slots:
+                already_have.append(f"Telefon: {state.slots['customer_phone']}")
+            if already_have:
+                missing = "telefonnumret" if "customer_name" in state.slots else "ditt namn"
+                return f"Tack! Jag saknar fortfarande {missing}. Vänligen ange det."
+            return "Tack! Ange ditt namn och telefonnummer för att slutföra bokningen."
+
+        if step_id == "finalize":
+            loc_id = state.slots.get("location_id", "")
+            loc = next((l for l in self.data["locations"] if l["id"] == loc_id), {})
+            return (
+                f"Tack! Din bokning är bekräftad. 🎉\n\n"
+                f"{handler_context}\n\n"
+                f"Har du frågor? Ring oss på {loc.get('phone', '')}.\n"
+                f"Vi ser fram emot ditt besök!"
+            )
 
         if step_id == "confirm":
             service_map = {s["id"]: s["name"] for s in self.data["services"]}
