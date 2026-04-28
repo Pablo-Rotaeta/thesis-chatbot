@@ -15,7 +15,7 @@ Bugs corregidos:
 import json, re, uuid, yaml
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.services.llm_adapters import BaseLLMAdapter, Message
 
@@ -25,10 +25,36 @@ from app.services.llm_adapters import BaseLLMAdapter, Message
 # ---------------------------------------------------------------------------
 
 DATA_PATH = Path(__file__).parent.parent.parent / "data" / "appointments.json"
+WEEKLY_TEMPLATE_PATH = Path(__file__).parent.parent.parent / "data" / "weekly_template.json"
+
+
+def generate_slots_from_template(days_ahead: int = 14) -> Dict[str, List[str]]:
+    """Generate available slots dynamically from the weekly template based on today's date."""
+    with open(WEEKLY_TEMPLATE_PATH) as f:
+        template = json.load(f)
+
+    today = datetime.today()
+    results: Dict[str, List[str]] = {}
+    for location, schedule in template["weekly_template"].items():
+        results[location] = []
+        for i in range(days_ahead):
+            day = today + timedelta(days=i)
+            weekday_name = day.strftime("%A").lower()
+            if weekday_name in schedule:
+                for time_str in schedule[weekday_name]:
+                    # Skip times that have already passed today
+                    if day.date() == today.date() and time_str <= today.strftime("%H:%M"):
+                        continue
+                    results[location].append(f"{day.strftime('%Y-%m-%d')} {time_str}")
+    return results
+
 
 def load_appointment_data() -> Dict:
     with open(DATA_PATH) as f:
-        return json.load(f)
+        data = json.load(f)
+    # Override available_slots with dynamically generated times based on today's date
+    data["available_slots"] = generate_slots_from_template()
+    return data
 
 def build_location_list(data: Dict) -> str:
     return "\n".join(
@@ -381,6 +407,61 @@ class SkillBasedDialogManager:
             )
         return ""
 
+    # ── Template responses (no LLM call) ─────────────────────────────────────
+
+    def _get_template_response(self, step: Dict, state: SkillState, handler_context: str = "") -> Optional[str]:
+        """Return a deterministic response for steps whose content is fully known.
+
+        Using templates for these steps eliminates ~3 LLM calls per session,
+        drastically reducing 503 / rate-limit errors from the LLM provider.
+        """
+        step_id = step.get("id")
+
+        if step_id == "collect_location":
+            return (
+                "Vilken av våra verkstäder passar dig bäst?\n\n"
+                "1. Vasastan – Upplandsgatan 14\n"
+                "2. Södermalm – Hornsgatan 82\n"
+                "3. Nacka – Värmdövägen 55\n"
+                "4. Solna – Frösundaleden 4"
+            )
+
+        if step_id == "collect_date" and handler_context:
+            return f"{handler_context}\n\nVilken tid passar dig bäst?"
+
+        if step_id == "confirm":
+            service_map = {s["id"]: s["name"] for s in self.data["services"]}
+            loc_id = state.slots.get("location_id", "")
+            loc = next((l for l in self.data["locations"] if l["id"] == loc_id), {})
+            service_name = service_map.get(
+                state.slots.get("service_type", ""),
+                state.slots.get("service_type", "-"),
+            )
+            slot_str = state.slots.get("appointment_slot", "")
+            if slot_str:
+                try:
+                    dt = datetime.strptime(slot_str, "%Y-%m-%d %H:%M")
+                    day_sv = ["måndag","tisdag","onsdag","torsdag","fredag","lördag","söndag"][dt.weekday()]
+                    month_sv = ["januari","februari","mars","april","maj","juni",
+                                "juli","augusti","september","oktober","november","december"][dt.month - 1]
+                    slot_display = f"{day_sv} {dt.day} {month_sv} kl. {dt.strftime('%H:%M')}"
+                except ValueError:
+                    slot_display = slot_str
+            else:
+                slot_display = "-"
+
+            return (
+                f"Här är din bokningssammanfattning:\n\n"
+                f"• Ärende: {service_name}\n"
+                f"• Verkstad: {loc.get('name', loc_id)}, {loc.get('address', '')}\n"
+                f"• Datum och tid: {slot_display}\n"
+                f"• Namn: {state.slots.get('customer_name', '-')}\n"
+                f"• Telefon: {state.slots.get('customer_phone', '-')}\n\n"
+                f"Stämmer allt detta? Svara ja för att bekräfta eller nej om du vill ändra något."
+            )
+
+        return None
+
     # ── Prompt builder ────────────────────────────────────────────────────────
 
     def _build_step_prompt(self, step: Dict, state: SkillState, handler_context: str = "") -> str:
@@ -418,6 +499,12 @@ class SkillBasedDialogManager:
                    conversation_history: List[Dict],
                    user_message: Optional[str],
                    handler_context: str = "") -> str:
+        # Use a template response when the content is fully determined by data,
+        # avoiding an LLM call entirely for collect_location, collect_date, confirm.
+        template = self._get_template_response(step, state, handler_context)
+        if template is not None:
+            return template
+
         messages = [Message(m["role"], m["content"]) for m in conversation_history]
         if user_message:
             messages.append(Message("user", user_message))
