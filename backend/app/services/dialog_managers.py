@@ -360,19 +360,40 @@ class SkillBasedDialogManager:
 
         return user_message.strip() if user_message.strip() else None
 
+    # Swedish words that are connectors / phone-description words, never part of a name
+    _NAME_STOP_WORDS = {
+        "och", "mit", "mitt", "nummer", "numret", "är", "telefon", "tel",
+        "mobil", "min", "på", "för", "nr", "heter", "namn", "my", "name",
+        "is", "and", "the", "number",
+    }
+
     def _extract_name_and_phone(self, user_message: str, state: SkillState):
-        """Extract name and phone from a single message or across turns."""
+        """Extract name and phone from a single message or across turns.
+
+        Uses a digit-only phone pattern (no spaces) so the text before the
+        number is not accidentally inflated by space-matching.
+        """
         msg = user_message.strip()
-        phone_pattern = re.compile(r'[\+]?[\d\s\-]{7,15}')
+        # Pattern: must START with a digit (or +digit), allows internal spaces/hyphens,
+        # must END with a digit. This prevents leading-space matches that pollute the name.
+        phone_pattern = re.compile(r'\+?\d[\d\-\s]{5,13}\d')
         phone_match = phone_pattern.search(msg)
 
         if phone_match:
-            phone = re.sub(r'\s+', '', phone_match.group()).strip()
+            phone = re.sub(r'[\s\-]+', '', phone_match.group()).strip()
+            # Everything before and after the phone number candidate
             name_part = (msg[:phone_match.start()] + msg[phone_match.end():])
             name_part = re.sub(r'\s+', ' ', name_part).strip()
+            # Strip common filler phrases
             for filler in ["mitt namn är", "jag heter", "my name is", "namn:", "telefon:", "tel:"]:
                 name_part = re.sub(filler, "", name_part, flags=re.IGNORECASE).strip()
-            name_part = name_part.strip(" ,.-")
+            # Keep only words that look like name tokens (alphabetic, not a stop word)
+            name_words = [
+                w for w in name_part.split()
+                if w.lower() not in self._NAME_STOP_WORDS
+                and re.match(r'^[A-Za-zÅÄÖåäöÉéÜü\-]+$', w)
+            ]
+            name_part = " ".join(name_words[:3]).strip(" ,.-")
 
             if phone and len(phone) >= 7 and "customer_phone" not in state.slots:
                 state.slots["customer_phone"] = phone
@@ -564,6 +585,27 @@ class SkillBasedDialogManager:
             extracted = self._extract_slot(step, user_message)
 
             if extracted:
+                # ── Special case: user rejected the confirmation ──────────────
+                if step["id"] == "confirm" and extracted == "nej":
+                    # Go back to collect_name so user can correct name/phone.
+                    # Clear the name/phone slots so they are re-collected.
+                    collect_name_idx = next(
+                        (i for i, s in enumerate(self.steps) if s["id"] == "collect_name"), 3
+                    )
+                    state.current_step_index = collect_name_idx
+                    state.slots.pop("customer_name", None)
+                    state.slots.pop("customer_phone", None)
+                    state.retry_count = 0
+                    collect_name_step = self._get_step(collect_name_idx)
+                    reply = await self._llm(collect_name_step, state, conversation_history, user_message)
+                    return {
+                        "reply": reply,
+                        "system_state": state.to_dict(),
+                        "slots_filled": state.slots,
+                        "current_step": "collect_name",
+                        "is_complete": False,
+                    }
+
                 state.slots[step["slot"]] = extracted
                 state.retry_count = 0
                 state.current_step_index += 1
@@ -600,16 +642,27 @@ class SkillBasedDialogManager:
                 state.retry_count += 1
                 if state.retry_count >= self.recovery.get("max_retries_per_slot", 3):
                     state.retry_count = 0
-                    # Use hardcoded fallback — no extra Gemini call
+                    fallback = (
+                        "Vänligen svara ja för att bekräfta bokningen eller nej om du vill ändra något."
+                        if step["id"] == "confirm"
+                        else "Förlåt, jag förstod inte. Kan du försöka igen?"
+                    )
                     return {
-                        "reply": "Förlåt, jag förstod inte riktigt. Kan du beskriva ditt ärende på ett annat sätt? Till exempel: service, däckbyte, bromsar, eller annat.",
+                        "reply": fallback,
                         "system_state": state.to_dict(),
                         "slots_filled": state.slots,
                         "current_step": step["id"],
                         "is_complete": False,
                     }
-                # Normal retry — call LLM
+                # Normal retry — return template/LLM response
                 reply = await self._llm(step, state, conversation_history, user_message)
+                return {
+                    "reply": reply,
+                    "system_state": state.to_dict(),
+                    "slots_filled": state.slots,
+                    "current_step": step["id"],
+                    "is_complete": False,
+                }
 
         # ── Multi-slot step (name + phone) ────────────────────────────────────
         if step.get("slots"):
